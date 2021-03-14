@@ -42,66 +42,79 @@ namespace japaneseasmr.com
         {
             try
             {
-                int pageCount=GetPageCountFromSearchPage(await RequestHtml("https://japaneseasmr.com/?orderby=date&order=asc"));
-                var work_pages =new Dictionary<String, String>();
+                var download_tasks = new Dictionary<String, List<String>>();//file path->outter page的映射
+                if (false)
                 {
-                    var queue = new TaskQueue<Dictionary<String, String>>(100);
-                    for (int p = 1; p <= pageCount; p++)
-                        await queue.Add(GetPagesFromSearchPage(String.Format("https://japaneseasmr.com/page/{0}/?orderby=date&order=asc", p)));
-                    await queue.Done();
-                    foreach (var task in queue.done_task_list)
-                        foreach (var pair in task.Result)
-                            if (!work_pages.ContainsKey(pair.Key))
-                                work_pages.Add(pair.Key,pair.Value);
-                }
-                var download_pages = new Dictionary<String, KeyValuePair<bool, List<String>>>();
-                {
-                    var queue = new TaskQueue<KeyValuePair<String, KeyValuePair<bool, List<String>>>>(100);
-                    foreach (var item in work_pages)
-                        await queue.Add(GetDownloadPagesFromPage(item.Key, item.Value));
-                    await queue.Done();
-                    foreach (var task in queue.done_task_list)
-                        if(!download_pages.ContainsKey(task.Result.Key))
-                            download_pages.Add(task.Result.Key,task.Result.Value);
-                }
-                //有anofiles和zipppyshare两种，文件名重复的只下载一个
-                var outter_pages = new Dictionary<String, HashSet<String>>();//file name->outter page的映射
-                var download_tasks = new Dictionary<String,List<String>>();//file path->outter page的映射
-                foreach (var item in download_pages)
-                {
-                    var regex = new Regex("#.*");
-                    foreach (var url in item.Value.Value)
+                    int pageCount = GetPageCountFromSearchPage(await RequestHtml("https://japaneseasmr.com/?orderby=date&order=asc"));
+                    var work_pages = new Dictionary<String, String>();
                     {
-                        var name=url.Substring(url.LastIndexOf("#")+1);
-                        List<String> outter_url =null;
-                        if (!outter_pages.ContainsKey(name))
+                        var queue = new TaskQueue<Dictionary<String, String>>(100);
+                        for (int p = 1; p <= pageCount; p++)
+                            await queue.Add(GetPagesFromSearchPage(String.Format("https://japaneseasmr.com/page/{0}/?orderby=date&order=asc", p)));
+                        await queue.Done();
+                        foreach (var task in queue.done_task_list)
+                            foreach (var pair in task.Result)
+                                if (!work_pages.ContainsKey(pair.Key))
+                                    work_pages.Add(pair.Key, pair.Value);
+                    }
+                    var download_pages = new Dictionary<String, KeyValuePair<bool, List<String>>>();
+                    {
+                        var queue = new TaskQueue<KeyValuePair<String, KeyValuePair<bool, List<String>>>>(100);
+                        foreach (var item in work_pages)
+                            await queue.Add(GetDownloadPagesFromPage(item.Key, item.Value));
+                        await queue.Done();
+                        foreach (var task in queue.done_task_list)
+                            if (!download_pages.ContainsKey(task.Result.Key))
+                                download_pages.Add(task.Result.Key, task.Result.Value);
+                    }
+                    //有anofiles和zipppyshare两种，文件名重复的只下载一个
+                    var outter_pages = new Dictionary<String, HashSet<String>>();//file name->outter page的映射
+                    foreach (var item in download_pages)
+                    {
+                        var regex = new Regex("#.*");
+                        foreach (var url in item.Value.Value)
                         {
-                            var real_url = url.Insert(url.LastIndexOf("#"), "/");//省去一次重定向
-                            foreach (var pair in await GetOutterLinksFromDownloadPage(real_url))
-                                if (!outter_pages.ContainsKey(pair.Key))
-                                    outter_pages.Add(pair.Key, pair.Value);
-                                else
-                                    foreach(var v in pair.Value)
-                                        outter_pages[pair.Key].Add(v);
+                            var name = url.Substring(url.LastIndexOf("#") + 1);
+                            List<String> outter_url = null;
+                            if (!outter_pages.ContainsKey(name))
+                            {
+                                var real_url = url.Insert(url.LastIndexOf("#"), "/");//省去一次重定向
+                                foreach (var pair in await GetOutterLinksFromDownloadPage(real_url))
+                                    if (!outter_pages.ContainsKey(pair.Key))
+                                        outter_pages.Add(pair.Key, pair.Value);
+                                    else
+                                        foreach (var v in pair.Value)
+                                            outter_pages[pair.Key].Add(v);
+                            }
+                            if (outter_pages.ContainsKey(name))
+                                outter_url = outter_pages[name].ToList<String>();
+                            else//有的就是没有文件的
+                                continue;
+                            var dir = RootDir + (item.Value.Key ? "_R18/" : "/") + item.Key;
+                            var path = dir + "/" + name + ".mp3";
+                            if (!download_tasks.ContainsKey(path))//一个文件可能给出多个链接
+                                download_tasks.Add(path, outter_url);
+                            else
+                                download_tasks[path].AddRange(outter_url);
                         }
-                        if (outter_pages.ContainsKey(name))
-                            outter_url = outter_pages[name].ToList<String>();
-                        else//有的就是没有文件的
-                            continue;
-                        var dir = RootDir+(item.Value.Key?"R18/":"/") + item.Key;
-                        Directory.CreateDirectory(dir);
-                        var path = dir +"/"+ name+".mp3";
-                        if (!download_tasks.ContainsKey(path))//一个文件可能给出多个链接
-                            download_tasks.Add(path, outter_url);
+                    }
+                    var tempo = "";
+                    foreach (var item in download_tasks)
+                        foreach (var page in item.Value)
+                            tempo += item.Key + "\n" + page + "\n";
+                    File.WriteAllText(@"E:\MyWebsiteHelper\MySpider\1.txt", tempo, Encoding.UTF8);
+                }
+                else
+                {
+                    var array=File.ReadAllLines(@"E:\MyWebsiteHelper\MySpider\1.txt");
+                    for(int i=0;i+1<array.Count();i+=2)
+                    {
+                        if (download_tasks.ContainsKey(array[i]))
+                            download_tasks[array[i]].Add(array[i + 1]);
                         else
-                            download_tasks[path].AddRange(outter_url);
+                            download_tasks[array[i]] = new List<String> { array[i + 1] };
                     }
                 }
-                var tempo = "";
-                foreach (var item in download_tasks)
-                    foreach (var page in item.Value)
-                        tempo += item.Key + "\n" + page + "\n";
-                File.WriteAllText(@"E:\MyWebsiteHelper\MySpider\1.txt", tempo, Encoding.UTF8);
                 //anonfiles的直接下载,zippyshare还需要找到链接
                 foreach (var item in download_tasks)
                 {
@@ -129,8 +142,10 @@ namespace japaneseasmr.com
                         var finfo = new FileInfo(item.Key);
                         var dir=finfo.DirectoryName;
                         var file_name = finfo.Name;
+                        Directory.CreateDirectory(dir);
                         idm.SendLinkToIDM(url, "", cookie, "", "", "", dir, file_name, 0x01 | 0x02);
                         success = true;
+                        break;
                     }
                     if(!success)
                     {
@@ -147,7 +162,7 @@ namespace japaneseasmr.com
         }
         private async Task<String> RequestPage(String addr)
         {
-            for(int i=8;i>0;--i)
+            for(int i=12;i>0;--i)
                 try
                 {
                     HttpResponseMessage response = await httpClient.GetAsync(addr);
@@ -159,10 +174,8 @@ namespace japaneseasmr.com
                 {
                     string msg = e.Message;//e.InnerException.InnerException.Message;
                     Console.WriteLine("Request Fail :" + msg);
-                    if (i == 1)
-                        throw;
                 }
-            return "";
+            return null;
         }
         private async Task<HtmlDocument> RequestHtml(string url)
         {
@@ -265,6 +278,8 @@ namespace japaneseasmr.com
         private async Task<KeyValuePair<String, String>> GetRealURLFromAnofiles(String _url)
         {
             var doc = await RequestHtml(_url);
+            if (doc is null)
+                return new KeyValuePair<String, String>("", "");
             var node = doc.DocumentNode.SelectSingleNode("//a[@id='download-url']");           
             return new KeyValuePair<String, String>(node.Attributes["href"].Value, "");
         }
