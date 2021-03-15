@@ -12,11 +12,13 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using MSScriptControl;
 using IDManLib;
+using System.Threading;
 
 namespace japaneseasmr.com
 {
     class Fetcher
     {
+        private String tempo_file = @"E:\MyWebsiteHelper\MySpider\1.txt";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
@@ -43,7 +45,7 @@ namespace japaneseasmr.com
             try
             {
                 var download_tasks = new Dictionary<String, List<String>>();//file path->outter page的映射
-                if (true)
+                if (false)
                 {
                     int pageCount = GetPageCountFromSearchPage(await RequestHtml("https://japaneseasmr.com/?orderby=date&order=asc"));
                     var work_pages = new Dictionary<String, String>();
@@ -102,11 +104,11 @@ namespace japaneseasmr.com
                     foreach (var item in download_tasks)
                         foreach (var page in item.Value)
                             tempo += item.Key + "\n" + page + "\n";
-                    File.WriteAllText(@"E:\MyWebsiteHelper\MySpider\1.txt", tempo, Encoding.UTF8);
+                    File.WriteAllText(tempo_file, tempo, Encoding.UTF8);
                 }
                 else
                 {
-                    var array=File.ReadAllLines(@"E:\MyWebsiteHelper\MySpider\1.txt");
+                    var array=File.ReadAllLines(tempo_file);
                     for(int i=0;i+1<array.Count();i+=2)
                     {
                         if (download_tasks.ContainsKey(array[i]))
@@ -115,9 +117,19 @@ namespace japaneseasmr.com
                             download_tasks[array[i]] = new List<String> { array[i + 1] };
                     }
                 }
+                //由于下载速度和迷之原因，失效无法避免，反复运行到全下载完就行了
                 //anonfiles的直接下载,zippyshare还需要找到链接
+                //获取链接很慢但这并不是瓶颈没有异步的必要
                 foreach (var item in download_tasks)
                 {
+                    var finfo = new FileInfo(item.Key);
+                    var dir = finfo.DirectoryName;
+                    var file_name = finfo.Name;
+                    if(Directory.Exists(dir))
+                        foreach (var f in new DirectoryInfo(dir).GetFiles("*.html"))//删除失效而被重定向到网页的文件
+                            f.Delete();
+                    if (finfo.Exists)
+                        continue;
                     bool success = false;
                     foreach(var page in item.Value)
                     {
@@ -139,18 +151,14 @@ namespace japaneseasmr.com
                             Console.WriteLine("Unknown Outter Site");
                         if (url == "")
                             continue;
-                        var finfo = new FileInfo(item.Key);
-                        var dir=finfo.DirectoryName;
-                        var file_name = finfo.Name;
                         Directory.CreateDirectory(dir);
                         idm.SendLinkToIDM(url, "", cookie, "", "", "", dir, file_name, 0x01 | 0x02);
                         success = true;
+                        Thread.Sleep(1000*10);//缓释
                         break;
                     }
                     if(!success)
-                    {
                         Console.WriteLine("Fail");
-                    }
                 }
 
             }
