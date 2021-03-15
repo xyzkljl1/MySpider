@@ -43,7 +43,7 @@ namespace japaneseasmr.com
             try
             {
                 var download_tasks = new Dictionary<String, List<String>>();//file path->outter page的映射
-                if (false)
+                if (true)
                 {
                     int pageCount = GetPageCountFromSearchPage(await RequestHtml("https://japaneseasmr.com/?orderby=date&order=asc"));
                     var work_pages = new Dictionary<String, String>();
@@ -258,6 +258,15 @@ namespace japaneseasmr.com
         private async Task<KeyValuePair<String,String>> GetRealURLFromZippyshare(String _url)
         {
             var doc = await RequestHtml(_url);
+            if(doc is null)
+            {
+                doc = await RequestHtml(_url);
+                if (doc is null)
+                {
+                    doc = await RequestHtml(_url);//由于蜜汁原因，有的网页明明能访问还是会走到这一步，调试时强行重来一遍又能访问了
+                    return new KeyValuePair<String, String>("","");
+                }
+            }
             var btn_node = doc.DocumentNode.SelectSingleNode("//a[@id='dlbutton']");
             if (btn_node is null)
                 return new KeyValuePair<string, string>("", "");
