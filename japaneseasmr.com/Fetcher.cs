@@ -182,6 +182,7 @@ namespace japaneseasmr.com
                 {
                     string msg = e.Message;//e.InnerException.InnerException.Message;
                     Console.WriteLine("Request Fail :" + msg);
+                    Thread.Sleep(20);
                 }
             return null;
         }
@@ -280,8 +281,13 @@ namespace japaneseasmr.com
                 return new KeyValuePair<string, string>("", "");
             var parent_node = btn_node.ParentNode;
             var script = parent_node.SelectSingleNode("script").InnerText;
-            var match = Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);");
-            var express = match.Groups[1].Value;
+            //提取脚本中的定义和赋值
+            var express = "";
+            foreach (var m in Regex.Matches(script, "var.*?[a-z0-9_]+.*?=.*?;"))
+                express += m.ToString();
+            if(express!="")
+                express += "a=Math.floor(a/3);";
+            express += Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);").Groups[1].Value;
             ScriptControl scriptControl = new MSScriptControl.ScriptControl();
             scriptControl.UseSafeSubset = true;
             scriptControl.Language = "JScript";
