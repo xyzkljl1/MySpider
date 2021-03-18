@@ -16,15 +16,29 @@ using System.Threading;
 
 namespace japaneseasmr.com
 {
+    class Work
+    {
+        public bool r=false;
+        public List<String> work_pages=new List<string>();
+        public List<String> download_pages=new List<string>();
+        public Dictionary<String,HashSet<String>> outter_pages=new Dictionary<string, HashSet<string>>();
+        public int fail_ct=0;
+    }
     class Fetcher
     {
-        private String tempo_file = @"E:\MyWebsiteHelper\MySpider\1.txt";
+        private String RootDir = "G:/ASMR_Unreliable";
+        private String RootDirR = "G:/ASMR_UnreliableR";
+        private String TmpDir = "E:/Tmp/MySpider";
+        public String query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
-        private String RootDir="";
-        public Fetcher(String dir) {
-            RootDir = dir;
+        private DateTime LastFetchTime =DateTime.MinValue;
+        private Dictionary<String, Work> works = new Dictionary<string, Work>();
+        private Dictionary<String, Work> downloading_works = new Dictionary<string, Work>();
+
+
+        public Fetcher() {            
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             var handler = new HttpClientHandler()
             {
@@ -42,131 +56,211 @@ namespace japaneseasmr.com
         }
         public async Task Start()
         {
+            int index=0;
+            while(true)
+            {
+                if(index%(24*14)==0)//每周
+                {
+                    int tmp = works.Count;
+                    await FetchSearchPage();
+                    Console.WriteLine(String.Format("Fetch Search Page {0} => {1}",tmp,works.Count));
+                }
+                await Download(25);
+                CheckDownload();
+                Thread.Sleep(1000 *60*60);//每小时一次
+            }
+        }
+        private void CheckDownload()
+        {
+            var done_tasks = new List<String>();
+            foreach(var work_pair in downloading_works)
+            {
+                var id = work_pair.Key;
+                var work = work_pair.Value;
+                var dest_dir = "";
+                {
+                    String parent_dir = work.r ? RootDirR : RootDir;
+                    foreach (var d in Directory.GetFileSystemEntries(parent_dir, id + "*"))//如果已经存在则用存在的，否则创建一个
+                        dest_dir = d;
+                    if (dest_dir == "")
+                        dest_dir = parent_dir + "/" + id;
+                }
+                var src_dir = TmpDir + "/" + id;
+                bool done = true;
+                foreach (var outter_pair in work.outter_pages)
+                {
+                    var file_name = outter_pair.Key + ".mp3";
+                    var src_path = src_dir + "/" + file_name;
+                    if (!File.Exists(src_path))
+                        done = false;
+                }
+                if(done)
+                {
+                    done_tasks.Add(id);
+                    foreach (var outter_pair in work.outter_pages)
+                    {
+                        var file_name = outter_pair.Key + ".mp3";
+                        var src_path = src_dir + "/" + file_name;
+                        File.Copy(src_path, dest_dir+"/"+file_name,true);
+                    }
+                    Directory.Delete(src_dir);
+                    Console.WriteLine(String.Format("Download {0} Done",id));
+                }
+            }
+            foreach (var id in done_tasks)
+                downloading_works.Remove(id);
+            Console.WriteLine(String.Format("Downloading Check {0}",downloading_works.Count));
+        }
+        private async Task Download(int ct)
+        {
             try
             {
-                var download_tasks = new Dictionary<String, List<String>>();//file path->outter page的映射
-                if (false)
+                var eliminated = await GetEliminatedWorks();
+                var processed_works =works.Take(ct).ToDictionary(kv=>kv.Key,kv=>kv.Value);
+                foreach (var work_pair in processed_works)
                 {
-                    int pageCount = GetPageCountFromSearchPage(await RequestHtml("https://japaneseasmr.com/?orderby=date&order=asc"));
-                    var work_pages = new Dictionary<String, String>();
-                    {
-                        var queue = new TaskQueue<Dictionary<String, String>>(100);
-                        for (int p = 1; p <= pageCount; p++)
-                            await queue.Add(GetPagesFromSearchPage(String.Format("https://japaneseasmr.com/page/{0}/?orderby=date&order=asc", p)));
-                        await queue.Done();
-                        foreach (var task in queue.done_task_list)
-                            foreach (var pair in task.Result)
-                                if (!work_pages.ContainsKey(pair.Key))
-                                    work_pages.Add(pair.Key, pair.Value);
-                    }
-                    var download_pages = new Dictionary<String, KeyValuePair<bool, List<String>>>();
-                    {
-                        var queue = new TaskQueue<KeyValuePair<String, KeyValuePair<bool, List<String>>>>(100);
-                        foreach (var item in work_pages)
-                            await queue.Add(GetDownloadPagesFromPage(item.Key, item.Value));
-                        await queue.Done();
-                        foreach (var task in queue.done_task_list)
-                            if (!download_pages.ContainsKey(task.Result.Key))
-                                download_pages.Add(task.Result.Key, task.Result.Value);
-                    }
-                    //有anofiles和zipppyshare两种，文件名重复的只下载一个
-                    var outter_pages = new Dictionary<String, HashSet<String>>();//file name->outter page的映射
-                    foreach (var item in download_pages)
-                    {
-                        var regex = new Regex("#.*");
-                        foreach (var url in item.Value.Value)
-                        {
-                            var name = url.Substring(url.LastIndexOf("#") + 1);
-                            List<String> outter_url = null;
-                            if (!outter_pages.ContainsKey(name))
-                            {
-                                var real_url = url.Insert(url.LastIndexOf("#"), "/");//省去一次重定向
-                                foreach (var pair in await GetOutterLinksFromDownloadPage(real_url))
-                                    if (!outter_pages.ContainsKey(pair.Key))
-                                        outter_pages.Add(pair.Key, pair.Value);
-                                    else
-                                        foreach (var v in pair.Value)
-                                            outter_pages[pair.Key].Add(v);
-                            }
-                            if (outter_pages.ContainsKey(name))
-                                outter_url = outter_pages[name].ToList<String>();
-                            else//有的就是没有文件的
-                                continue;
-                            var dir = RootDir + (item.Value.Key ? "_R18/" : "/") + item.Key;
-                            var path = dir + "/" + name + ".mp3";
-                            if (!download_tasks.ContainsKey(path))//一个文件可能给出多个链接
-                                download_tasks.Add(path, outter_url);
-                            else
-                                download_tasks[path].AddRange(outter_url);
-                        }
-                    }
-                    var tempo = "";
-                    foreach (var item in download_tasks)
-                        foreach (var page in item.Value)
-                            tempo += item.Key + "\n" + page + "\n";
-                    File.WriteAllText(tempo_file, tempo, Encoding.UTF8);
-                }
-                else
-                {
-                    var array=File.ReadAllLines(tempo_file);
-                    for(int i=0;i+1<array.Count();i+=2)
-                    {
-                        if (download_tasks.ContainsKey(array[i]))
-                            download_tasks[array[i]].Add(array[i + 1]);
-                        else
-                            download_tasks[array[i]] = new List<String> { array[i + 1] };
-                    }
-                }
-                //由于下载速度和迷之原因，失效无法避免，反复运行到全下载完就行了
-                //anonfiles的直接下载,zippyshare还需要找到链接
-                //获取链接很慢但这并不是瓶颈没有异步的必要
-                foreach (var item in download_tasks)
-                {
-                    var finfo = new FileInfo(item.Key);
-                    var dir = finfo.DirectoryName;
-                    var file_name = finfo.Name;
-                    if(Directory.Exists(dir))
-                        foreach (var f in new DirectoryInfo(dir).GetFiles("*.html"))//删除失效而被重定向到网页的文件
-                            f.Delete();
-                    if (finfo.Exists)
+                    var id = work_pair.Key;
+                    var work = work_pair.Value;
+                    works.Remove(id);
+                    if (eliminated.Contains(id))
                         continue;
-                    bool success = false;
-                    foreach(var page in item.Value)
+                    //获取下载页面
+                    foreach (var url in work.work_pages)
                     {
-                        var url = "";
-                        var cookie = "";
-                        if (Regex.IsMatch(page, "https://www.*.zippyshare.com/.*"))
-                        {
-                            var ret=await GetRealURLFromZippyshare(page);
-                            url = ret.Key;
-                            cookie = ret.Value;
-                        }
-                        else if (Regex.IsMatch(page, "https://anonfiles.com/.*"))
-                        {
-                            var ret =await GetRealURLFromAnofiles(page);
-                            url = ret.Key;
-                            cookie = ret.Value;
-                        }
-                        else
-                            Console.WriteLine("Unknown Outter Site");
-                        if (url == "")
-                            continue;
-                        Directory.CreateDirectory(dir);
-                        idm.SendLinkToIDM(url, "", cookie, "", "", "", dir, file_name, 0x01 | 0x02);
-                        success = true;
-                        Thread.Sleep(1000*10);//缓释
-                        break;
+                        var ret = await GetDownloadPagesFromPage(url);
+                        work.r = ret.Key;
+                        work.download_pages.AddRange(ret.Value);
                     }
-                    if(!success)
-                        Console.WriteLine("Fail");
+                    //获取外链页面，有anofiles和zipppyshare两种
+                    //一个下载页面会有很多work的外链地址，为了保证获得更完整更新的链接，无视多余的链接
+                    var regex = new Regex("#.*");
+                    foreach (var url in work.download_pages)
+                    {
+                        var name = url.Substring(url.LastIndexOf("#") + 1);//文件名
+                        var real_url = url.Insert(url.LastIndexOf("#"), "/");//省去一次重定向
+                        var ret = await GetOutterLinksFromDownloadPage(real_url);
+                        if (ret.ContainsKey(name))
+                        {
+                            if (work.outter_pages.ContainsKey(name))
+                                work.outter_pages[name].UnionWith(ret[name]);
+                            else
+                                work.outter_pages.Add(name, ret[name]);
+                        }
+                    }
+                    bool work_success = true;
+                    //获取真实链接
+                    foreach (var outter_pair in work.outter_pages)
+                    {
+                        var file_name = outter_pair.Key+".mp3";
+                        var dir = TmpDir + "/" + id;//下载到临时目录
+                        if (!Directory.Exists(dir))
+                            Directory.CreateDirectory(dir);
+                        else
+                            foreach (var f in new DirectoryInfo(dir).GetFiles("*.html"))//删除失效而被重定向到网页的文件
+                                f.Delete();
+                        if (File.Exists(dir+"/"+file_name))
+                            continue;
+                        bool file_success = false;
+                        foreach (var page in outter_pair.Value)
+                        {
+                            var url = "";
+                            var cookie = "";
+                            if (Regex.IsMatch(page, "https://www.*.zippyshare.com/.*"))
+                            {
+                                var ret = await GetRealURLFromZippyshare(page);
+                                url = ret.Key;
+                                cookie = ret.Value;
+                            }
+                            else if (Regex.IsMatch(page, "https://anonfiles.com/.*"))
+                            {
+                                var ret = await GetRealURLFromAnofiles(page);
+                                url = ret.Key;
+                                cookie = ret.Value;
+                            }
+                            else
+                                Console.WriteLine("Unknown Outter Site");
+                            if (url == "")
+                                continue;
+                            if (url.EndsWith("html"))
+                                continue;
+                            idm.SendLinkToIDM(url, "", cookie, "", "", "", dir, file_name, 0x01 | 0x02);
+                            file_success = true;
+                            break;
+                        }
+                        if (!file_success)
+                        {
+                            work_success = false;
+                            continue;
+                        }
+                    }
+                    if (!work_success)
+                    {
+                        Console.WriteLine("Fail On {0}", id);
+                        work.fail_ct++;
+                        if (work.fail_ct < 10)
+                            works.Add(id,work);//再试一次
+                    }
+                    else if(!downloading_works.ContainsKey(id))
+                        downloading_works.Add(id,work);
                 }
-
+                Console.WriteLine(String.Format("Process Download Queue {0}", works.Count));
             }
             catch (Exception e)
             {
                 string msg = e.Message;//e.InnerException.InnerException.Message;
-                Console.WriteLine("Fail :" + msg);
+                Console.Error.WriteLine("Fail :" + msg);
             }
+        }
+        public async Task FetchSearchPage()
+        {
+            int pageCount = GetPageCountFromSearchPage(await RequestHtml("https://japaneseasmr.com/?orderby=date&order=dsc"));//日期降序
+            for (int pi = 1; pi <= pageCount; pi++)
+            {
+                try
+                {
+                    var doc = await RequestHtml(String.Format("https://japaneseasmr.com/page/{0}/?orderby=date&order=dsc", pi));
+                    var regex = new Regex("[RVBJ]{2}[0-9]{3,6}");
+                    if (doc != null)
+                        foreach (var node in doc.DocumentNode.SelectNodes("//div[@class='entry-preview-wrapper clearfix']"))
+                        {
+                            if (node is null)
+                                continue;
+                            var time = DateTime.Parse(node.SelectSingleNode("//time").Attributes["datetime"].Value);
+                            var title_node = node.SelectSingleNode("h2[@class='entry-title']");
+                            var url = title_node.SelectSingleNode("a").Attributes["href"].Value;
+                            var id = "";
+                            foreach (var p_tag in node.SelectNodes("p"))
+                                foreach (var m in regex.Matches(p_tag.InnerText))
+                                    id = m.ToString();
+                            if (id != "" && url != "")
+                            {
+                                if (!works.ContainsKey(id))
+                                    works.Add(id, new Work());
+                                works[id].work_pages.Add(url);
+                                if(time<LastFetchTime)//只获取上次更新之后更新的work
+                                {
+                                    LastFetchTime = DateTime.Now.AddDays(-1);//偏移一天防止漏掉
+                                    return;
+                                }
+                            }
+                        }
+                    else
+                        Console.Error.WriteLine(String.Format("Cant Fetch Page {0}",pi));
+                }
+                catch (Exception e)
+                {
+                    string msg = e.Message;//e.InnerException.InnerException.Message;
+                    Console.Error.WriteLine(String.Format("Cant Fetch Page {0}:{1}", pi,msg));
+                }
+            }
+        }
+        private async Task<HashSet<String>> GetEliminatedWorks()
+        {
+            var ret = new HashSet<String>();
+            var response=await RequestPage(query_addr);
+            foreach (var id in response.Split(' '))
+                ret.Add(id);
+            return ret;
         }
         private async Task<String> RequestPage(String addr)
         {
@@ -203,36 +297,7 @@ namespace japaneseasmr.com
                     ret= Math.Max(ret, int.Parse(node.InnerText));
             return ret;
         }
-        private async Task<Dictionary<String,String>> GetPagesFromSearchPage(String _url)
-        {
-            try
-            {
-                var doc = await RequestHtml(_url);
-                var regex = new Regex("[RVBJ]{2}[0-9]{3,6}");
-                var ret = new Dictionary<String, String>();
-                if (doc != null)
-                    foreach (var node in doc.DocumentNode.SelectNodes("//div[@class='entry-preview-wrapper clearfix']"))
-                    {
-                        var title_node = node.SelectSingleNode("h2[@class='entry-title']");
-                        var url = title_node.SelectSingleNode("a").Attributes["href"].Value;
-                        var id = "";
-                        foreach (var p in node.SelectNodes("p"))
-                            foreach (var m in regex.Matches(p.InnerText))
-                                id = m.ToString();
-                        if (id != "" && url != "")
-                            if (!ret.ContainsKey(id))//同一个rj号可能有多个页面，暂不处理
-                                ret.Add(id, url);
-                    }
-                return ret;
-            }
-            catch (Exception e)
-            {
-                string msg = e.Message;//e.InnerException.InnerException.Message;
-                Console.WriteLine("Fail :" + msg);
-            }
-            return null;
-        }
-        private async Task<KeyValuePair<String,KeyValuePair<bool,List<String>>>> GetDownloadPagesFromPage(String key,String _url)
+        private async Task<KeyValuePair<bool,List<String>>> GetDownloadPagesFromPage(String _url)
         {
             var doc = await RequestHtml(_url);
             bool r18 =true;
@@ -246,9 +311,7 @@ namespace japaneseasmr.com
                     if (node.InnerText == "SFW"||node.InnerText== "NSFW (R-15)")
                         r18 = false;
             }
-            return new KeyValuePair<string, KeyValuePair<bool, List<string>>>(
-                key,
-                new KeyValuePair<bool, List<string>>(r18,urls));
+            return new KeyValuePair<bool, List<string>>(r18,urls);
         }
         private async Task<Dictionary<String, HashSet<String>>> GetOutterLinksFromDownloadPage(String _url)
         {

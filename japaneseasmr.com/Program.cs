@@ -12,7 +12,7 @@ namespace japaneseasmr.com
         {
             using (BlockSyncContext.Enter())
             {
-                var f = new Fetcher("G:/ASMR_Alter");
+                var f = new Fetcher();
                 f.Start().Wait();
             }
         }
