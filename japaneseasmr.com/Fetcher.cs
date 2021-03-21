@@ -107,7 +107,7 @@ namespace japaneseasmr.com
                         var src_path = src_dir + "/" + file_name;
                         File.Copy(src_path, dest_dir+"/"+file_name,true);
                     }
-                    Directory.Delete(src_dir);
+                    Directory.Delete(src_dir,true);
                     Console.WriteLine(String.Format("Download {0} Done",id));
                 }
             }
