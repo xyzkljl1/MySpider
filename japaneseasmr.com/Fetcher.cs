@@ -125,6 +125,7 @@ namespace japaneseasmr.com
                 {
                     var id = work_pair.Key;
                     var work = work_pair.Value;
+                    bool work_success = true;
                     works.Remove(id);
                     if (eliminated.Contains(id))
                         continue;
@@ -132,8 +133,13 @@ namespace japaneseasmr.com
                     foreach (var url in work.work_pages)
                     {
                         var ret = await GetDownloadPagesFromPage(url);
-                        work.r = ret.Key;
-                        work.download_pages.AddRange(ret.Value);
+                        if(ret is null)//因网络错误未获取到页面，无论是否获取到其它页面都视作失败
+                        {
+                            work_success = false;
+                            break;
+                        }
+                        work.r = ret.Value.Key;
+                        work.download_pages.AddRange(ret.Value.Value);
                     }
                     //获取外链页面，有anofiles和zipppyshare两种
                     //一个下载页面会有很多work的外链地址，为了保证获得更完整更新的链接，无视多余的链接
@@ -143,6 +149,11 @@ namespace japaneseasmr.com
                         var name = url.Substring(url.LastIndexOf("#") + 1);//文件名
                         var real_url = url.Insert(url.LastIndexOf("#"), "/");//省去一次重定向
                         var ret = await GetOutterLinksFromDownloadPage(real_url);
+                        if(ret is null)//因网络错误未获取到页面，无论是否获取到其它页面都视作失败
+                        {
+                            work_success = false;
+                            break;
+                        }
                         if (ret.ContainsKey(name))
                         {
                             if (work.outter_pages.ContainsKey(name))
@@ -151,8 +162,9 @@ namespace japaneseasmr.com
                                 work.outter_pages.Add(name, ret[name]);
                         }
                     }
-                    bool work_success = true;
                     //获取真实链接
+                    if (work.outter_pages.Count == 0)//无论因何种原因导致没有下载链接，都视作失败
+                        work_success = false;
                     foreach (var outter_pair in work.outter_pages)
                     {
                         var file_name = outter_pair.Key+".mp3";
@@ -307,7 +319,7 @@ namespace japaneseasmr.com
                     ret= Math.Max(ret, int.Parse(node.InnerText));
             return ret;
         }
-        private async Task<KeyValuePair<bool,List<String>>> GetDownloadPagesFromPage(String _url)
+        private async Task<KeyValuePair<bool,List<String>>?> GetDownloadPagesFromPage(String _url)
         {
             var doc = await RequestHtml(_url);
             bool r18 =true;
@@ -318,16 +330,18 @@ namespace japaneseasmr.com
                     foreach (var p in node.SelectNodes("p[@id='downloadlink']"))
                         urls.Add(p.SelectSingleNode("a").Attributes["href"].Value);
                 foreach (var node in doc.DocumentNode.SelectSingleNode("//span[@class='post-meta-span post-meta-span-category']").SelectNodes("a"))
-                    if (node.InnerText == "SFW"||node.InnerText== "NSFW (R-15)")
+                    if (node.InnerText == "SFW" || node.InnerText == "NSFW (R-15)")
                         r18 = false;
+                return new KeyValuePair<bool, List<string>>(r18, urls);
             }
-            return new KeyValuePair<bool, List<string>>(r18,urls);
+            return null;
         }
         private async Task<Dictionary<String, HashSet<String>>> GetOutterLinksFromDownloadPage(String _url)
         {
             var doc = await RequestHtml(_url);
-            var ret = new Dictionary<String, HashSet<String>>();
             if (doc != null)
+            {
+                var ret = new Dictionary<String, HashSet<String>>();
                 foreach (var node in doc.DocumentNode.SelectNodes("//div[@class='entry-content']"))
                     foreach (var a in node.SelectNodes("a"))
                     {
@@ -335,7 +349,9 @@ namespace japaneseasmr.com
                             ret.Add(a.Id, new HashSet<String>());
                         ret[a.Id].Add(a.Attributes["href"].Value);
                     }
-            return ret;
+                return ret;
+            }
+            return null;
         }
         private async Task<KeyValuePair<String,String>> GetRealURLFromZippyshare(String _url)
         {
