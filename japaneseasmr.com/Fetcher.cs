@@ -68,6 +68,7 @@ namespace japaneseasmr.com
                 await Download(25);
                 CheckDownload();
                 Thread.Sleep(1000 *60*60);//每小时一次
+                index++;
             }
         }
         private void CheckDownload()
