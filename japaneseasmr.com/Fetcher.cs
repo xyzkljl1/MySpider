@@ -97,6 +97,9 @@ namespace japaneseasmr.com
                 }
                 if(done)
                 {
+                    Thread.Sleep(3000);//略微等待，防止文件正在写入
+                    if (!Directory.Exists(dest_dir))
+                        Directory.CreateDirectory(dest_dir);
                     done_tasks.Add(id);
                     foreach (var outter_pair in work.outter_pages)
                     {
