@@ -246,7 +246,10 @@ namespace japaneseasmr.com
                             }
                         }
                     else
-                        Console.Error.WriteLine(String.Format("Cant Fetch Page {0}",pi));
+                    {
+                        Console.Error.WriteLine(String.Format("Cant Fetch Page {0}", pi));
+                        return;//中断,不更新LastFetchTime
+                    }
                 }
                 catch (Exception e)
                 {
@@ -254,6 +257,9 @@ namespace japaneseasmr.com
                     Console.Error.WriteLine(String.Format("Cant Fetch Page {0}:{1}", pi,msg));
                 }
             }
+            //初次运行，所有work都在LastFetchTime之后
+            LastFetchTime = DateTime.Now.AddDays(-1);//偏移一天防止漏掉
+            return;
         }
         private async Task<HashSet<String>> GetEliminatedWorks()
         {
