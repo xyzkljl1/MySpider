@@ -65,7 +65,7 @@ namespace japaneseasmr.com
                     await FetchSearchPage();
                     Console.WriteLine(String.Format("Fetch Search Page {0} => {1}",tmp,works.Count));
                 }
-                await Download(25);
+                await Download(10);
                 CheckDownload();
                 Thread.Sleep(1000 *60*60);//每小时一次
                 index++;
@@ -109,6 +109,15 @@ namespace japaneseasmr.com
                     }
                     Directory.Delete(src_dir,true);
                     Console.WriteLine(String.Format("Download {0} Done",id));
+                }
+                else
+                {
+                    work.fail_ct++;
+                    if(work.fail_ct>48)//两天没下载完视作失败
+                    {
+                        work.fail_ct = 0;
+                        works.Add(id,work);
+                    }
                 }
             }
             foreach (var id in done_tasks)
@@ -199,7 +208,7 @@ namespace japaneseasmr.com
                                 continue;
                             if (url.EndsWith("html"))
                                 continue;
-                            idm.SendLinkToIDM(url, "", cookie, "", "", "", dir, file_name, 0x01 | 0x02);
+                            idm.SendLinkToIDM(url, "", cookie, "", "", "", dir, file_name, 0x01 /*| 0x02*/);
                             file_success = true;
                             break;
                         }
@@ -213,11 +222,14 @@ namespace japaneseasmr.com
                     {
                         Console.WriteLine("Fail On {0}", id);
                         work.fail_ct++;
-                        if (work.fail_ct < 10)
+                        if (work.fail_ct < 15)
                             works.Add(id,work);//再试一次
                     }
                     else if(!downloading_works.ContainsKey(id))
-                        downloading_works.Add(id,work);
+                    {
+                        work.fail_ct = 0;
+                        downloading_works.Add(id, work);
+                    }
                 }
                 Console.WriteLine(String.Format("Process Download Queue {0}", works.Count));
             }
