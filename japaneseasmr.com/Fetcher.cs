@@ -32,27 +32,46 @@ namespace japaneseasmr.com
         public String query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
         private HttpClient httpClient;
+        private HttpClient httpClient_redirect;
         CookieContainer cookies_container = new CookieContainer();
         private DateTime LastFetchTime =DateTime.MinValue;
         private Dictionary<String, Work> works = new Dictionary<string, Work>();
         private Dictionary<String, Work> downloading_works = new Dictionary<string, Work>();
 
 
-        public Fetcher() {            
+        public Fetcher() {
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-            var handler = new HttpClientHandler()
             {
-                MaxConnectionsPerServer = 256,
-                UseCookies = true,
-                CookieContainer = cookies_container,
-                Proxy=new WebProxy("127.0.0.1:1196", false)
-            };
-            handler.ServerCertificateCustomValidationCallback = delegate { return true; };
-            httpClient = new HttpClient(handler);
-            httpClient.Timeout = new TimeSpan(0, 0, 35);
-            httpClient.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3");
-            httpClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
-            httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36");
+                var handler = new HttpClientHandler()
+                {
+                    MaxConnectionsPerServer = 256,
+                    UseCookies = true,
+                    CookieContainer = cookies_container,
+                    Proxy = new WebProxy("127.0.0.1:1196", false)
+                };
+                handler.ServerCertificateCustomValidationCallback = delegate { return true; };
+                httpClient = new HttpClient(handler);
+                httpClient.Timeout = new TimeSpan(0, 0, 35);
+                httpClient.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3");
+                httpClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36");
+            }
+            {
+                var handler = new HttpClientHandler()
+                {
+                    MaxConnectionsPerServer = 256,
+                    UseCookies = true,
+                    AllowAutoRedirect=false,
+                    CookieContainer = cookies_container,
+                    Proxy = new WebProxy("127.0.0.1:1196", false)
+                };
+                handler.ServerCertificateCustomValidationCallback = delegate { return true; };
+                httpClient_redirect = new HttpClient(handler);
+                httpClient_redirect.Timeout = new TimeSpan(0, 0, 35);
+                httpClient_redirect.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3");
+                httpClient_redirect.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
+                httpClient_redirect.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36");
+            }
         }
         public async Task Start()
         {
@@ -122,7 +141,10 @@ namespace japaneseasmr.com
             }
             foreach (var id in done_tasks)
                 downloading_works.Remove(id);
-            Console.WriteLine(String.Format("Downloading Check {0}",downloading_works.Count));
+            Console.Write(String.Format("Downloading Check {0} ",downloading_works.Count));
+            foreach (var work in downloading_works)
+                Console.Write(work.Key+" ");
+            Console.WriteLine();
         }
         private async Task Download(int ct)
         {
@@ -155,21 +177,12 @@ namespace japaneseasmr.com
                     var regex = new Regex("#.*");
                     foreach (var url in work.download_pages)
                     {
-                        var name = url.Substring(url.LastIndexOf("#") + 1);//文件名
-                        var real_url = url.Insert(url.LastIndexOf("#"), "/");//省去一次重定向
-                        var ret = await GetOutterLinksFromDownloadPage(real_url);
-                        if(ret is null)//因网络错误未获取到页面，无论是否获取到其它页面都视作失败
-                        {
-                            work_success = false;
-                            break;
-                        }
-                        if (ret.ContainsKey(name))
-                        {
-                            if (work.outter_pages.ContainsKey(name))
-                                work.outter_pages[name].UnionWith(ret[name]);
-                            else
-                                work.outter_pages.Add(name, ret[name]);
-                        }
+                        var name = url.Substring(url.LastIndexOf("=") + 1);//文件名
+                        var outter_page = await RequestRedirect(url);
+                        if (work.outter_pages.ContainsKey(name))
+                            work.outter_pages[name].Add(outter_page);
+                        else
+                            work.outter_pages.Add(name,new HashSet<string> { outter_page });
                     }
                     //获取真实链接
                     if (work.outter_pages.Count == 0)//无论因何种原因导致没有下载链接，都视作失败
@@ -314,6 +327,24 @@ namespace japaneseasmr.com
                 }
             return null;
         }
+        private async Task<String> RequestRedirect(String addr)
+        {
+            for (int i = 12; i > 0; --i)
+                try
+                {
+                    HttpResponseMessage response = await httpClient_redirect.GetAsync(addr);
+                    if(response.Headers.Location is null)
+                        throw new Exception("HTTP Not Success");
+                    return response.Headers.Location.ToString();
+                }
+                catch (Exception e)
+                {
+                    string msg = e.Message;//e.InnerException.InnerException.Message;
+                    Console.WriteLine("Request Fail :" + msg);
+                    Thread.Sleep(20);
+                }
+            return null;
+        }
         private async Task<HtmlDocument> RequestHtml(string url)
         {
             var doc = new HtmlDocument();
@@ -345,23 +376,6 @@ namespace japaneseasmr.com
                     if (node.InnerText == "SFW" || node.InnerText == "NSFW (R-15)")
                         r18 = false;
                 return new KeyValuePair<bool, List<string>>(r18, urls);
-            }
-            return null;
-        }
-        private async Task<Dictionary<String, HashSet<String>>> GetOutterLinksFromDownloadPage(String _url)
-        {
-            var doc = await RequestHtml(_url);
-            if (doc != null)
-            {
-                var ret = new Dictionary<String, HashSet<String>>();
-                foreach (var node in doc.DocumentNode.SelectNodes("//div[@class='entry-content']"))
-                    foreach (var a in node.SelectNodes("a"))
-                    {
-                        if (!ret.ContainsKey(a.Id))
-                            ret.Add(a.Id, new HashSet<String>());
-                        ret[a.Id].Add(a.Attributes["href"].Value);
-                    }
-                return ret;
             }
             return null;
         }
