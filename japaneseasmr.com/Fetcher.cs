@@ -84,7 +84,7 @@ namespace japaneseasmr.com
                     await FetchSearchPage();
                     Console.WriteLine(String.Format("Fetch Search Page {0} => {1}",tmp,works.Count));
                 }
-                await Download(10);
+                await Download(25);
                 CheckDownload();
                 Thread.Sleep(1000 *60*60);//每小时一次
                 index++;
