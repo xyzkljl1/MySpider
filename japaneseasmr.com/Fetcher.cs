@@ -397,11 +397,18 @@ namespace japaneseasmr.com
             var parent_node = btn_node.ParentNode;
             var script = parent_node.SelectSingleNode("script").InnerText;
             //提取脚本中的定义和赋值
+            /*
+            var n = 616401%2;
+            var b = 616401%3;
+            var z = 616404;
+            document.getElementById('dlbutton').href = "/d/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
+            if (document.getElementById('fimage')) {
+            document.getElementById('fimage').href = "/i/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
+            }
+             */
             var express = "";
             foreach (var m in Regex.Matches(script, "var.*?[a-z0-9_]+.*?=.*?;"))
                 express += m.ToString();
-            if(express!="")
-                express += "a=Math.floor(a/3);";
             express += Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);").Groups[1].Value;
             ScriptControl scriptControl = new MSScriptControl.ScriptControl();
             scriptControl.UseSafeSubset = true;
