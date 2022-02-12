@@ -381,53 +381,44 @@ namespace japaneseasmr.com
         }
         private async Task<KeyValuePair<String,String>> GetRealURLFromZippyshare(String _url)
         {
-            try
+            var doc = await RequestHtml(_url);
+            if(doc is null)
             {
-                var doc = await RequestHtml(_url);
+                doc = await RequestHtml(_url);
                 if (doc is null)
                 {
-                    doc = await RequestHtml(_url);
-                    if (doc is null)
-                    {
-                        doc = await RequestHtml(_url);//由于蜜汁原因，有的网页明明能访问还是会走到这一步，调试时强行重来一遍又能访问了
-                        return new KeyValuePair<String, String>("", "");
-                    }
+                    doc = await RequestHtml(_url);//由于蜜汁原因，有的网页明明能访问还是会走到这一步，调试时强行重来一遍又能访问了
+                    return new KeyValuePair<String, String>("","");
                 }
-                var btn_node = doc.DocumentNode.SelectSingleNode("//a[@id='dlbutton']");
-                if (btn_node is null)
-                    return new KeyValuePair<string, string>("", "");
-                var parent_node = btn_node.ParentNode;
-                var script = parent_node.SelectSingleNode("script").InnerText;
-                //提取脚本中的定义和赋值
-                /*
-                var n = 616401%2;
-                var b = 616401%3;
-                var z = 616404;
-                document.getElementById('dlbutton').href = "/d/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
-                if (document.getElementById('fimage')) {
-                document.getElementById('fimage').href = "/i/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
-                }
-                 */
-                var express = "";
-                foreach (var m in Regex.Matches(script, "var.*?[a-z0-9_]+.*?=.*?;"))
-                    express += m.ToString();
-                express += Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);").Groups[1].Value;
-                ScriptControl scriptControl = new MSScriptControl.ScriptControl();
-                scriptControl.UseSafeSubset = true;
-                scriptControl.Language = "JScript";
-                string path = scriptControl.Eval(express).ToString();
-                var real_url = Regex.Match(_url, "https://.*?/").ToString() + path.Substring(1);
-                var cookies = "";
-                foreach (var cookie in cookies_container.GetCookies(new Uri(real_url)).Cast<Cookie>())
-                    cookies += cookie.Name + "=" + cookie.Value + "; ";
-                return new KeyValuePair<String, String>(real_url, cookies);
             }
-            catch (Exception e)
-            {
-                string msg = e.Message;//e.InnerException.InnerException.Message;
-                Console.WriteLine("GetRealURLFromZippyshare Fail :" + msg+" on "+_url);
-                Thread.Sleep(20);
+            var btn_node = doc.DocumentNode.SelectSingleNode("//a[@id='dlbutton']");
+            if (btn_node is null)
+                return new KeyValuePair<string, string>("", "");
+            var parent_node = btn_node.ParentNode;
+            var script = parent_node.SelectSingleNode("script").InnerText;
+            //提取脚本中的定义和赋值
+            /*
+            var n = 616401%2;
+            var b = 616401%3;
+            var z = 616404;
+            document.getElementById('dlbutton').href = "/d/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
+            if (document.getElementById('fimage')) {
+            document.getElementById('fimage').href = "/i/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
             }
+             */
+            var express = "";
+            foreach (var m in Regex.Matches(script, "var.*?[a-z0-9_]+.*?=.*?;"))
+                express += m.ToString();
+            express += Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);").Groups[1].Value;
+            ScriptControl scriptControl = new MSScriptControl.ScriptControl();
+            scriptControl.UseSafeSubset = true;
+            scriptControl.Language = "JScript";
+            string path = scriptControl.Eval(express).ToString();
+            var real_url=Regex.Match(_url, "https://.*?/").ToString()+path.Substring(1);
+            var cookies = "";
+            foreach (var cookie in cookies_container.GetCookies(new Uri(real_url)).Cast<Cookie>())
+                cookies += cookie.Name + "=" + cookie.Value + "; ";
+            return new KeyValuePair<String, String> ( real_url, cookies );
         }
         private async Task<KeyValuePair<String, String>> GetRealURLFromAnofiles(String _url)
         {
