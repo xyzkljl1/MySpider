@@ -91,11 +91,12 @@ namespace asmr.one
                 }
                 while (true)
                 {
-                    if (index % (24 * 14) == 0)//每2周
+                    if (index % (24 * 7 * 2 * 2) == 0)//每2周
                         await FetchWorkList();
-                    await Download(15);
+                    //一次下载太多会有429 Too Many Requests
+                    await Download(7);
                     CheckDownload();
-                    Thread.Sleep(1000 * 60 * 60);//每小时一次
+                    Thread.Sleep(1000 * 30 * 60);//每半小时一次
                     index++;
                 }
             }
@@ -143,14 +144,17 @@ namespace asmr.one
                         }
                         Directory.Delete(src_dir, true);
                         foreach (var dir in work.alter_dir)
+                        {
                             Directory.Delete(dir, true);
+                            Console.WriteLine("Remove {0}", dir);
+                        }
                         work.status = Work.Status.Done;
                         Console.WriteLine(String.Format("Download {0} Done", work.RJ));
                     }
                     else
                     {
                         work.fail_ct++;
-                        if (work.fail_ct > 48)//两天没下载完视作失败
+                        if (work.fail_ct > 48 * 2)//两天没下载完视作失败
                         {
                             work.fail_ct = 0;
                             work.status = Work.Status.Waiting;
@@ -244,14 +248,15 @@ namespace asmr.one
         {
             try
             {
-                //seed不知道是什么,subtitle=1是带字幕，subtitle=0包含subtitle=1
+                Console.WriteLine("Start Fetch Work List");
+                //seed不知道是什么,subtitle=1是带字幕，subtitle=0包含subtitle=1,page从1开始而非0
                 String base_url = "https://api.asmr.one/api/works?order=id&sort=asc&page={0}&seed=35&subtitle=0";
-                var first_page = await GetJson(String.Format(base_url, 0));
+                var first_page = await GetJson(String.Format(base_url, 1));
                 var total_count = first_page.Value<JObject>("pagination").Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination").Value<Int32>("pageSize");
                 for(int p=0;p*page_size<total_count;p++)
                 {
-                    var page = await GetJson(String.Format(base_url, p));
+                    var page = await GetJson(String.Format(base_url, p+1));
                     if(page is null)
                     {
                         Console.WriteLine("Fail Fetch Page {0}", page);
@@ -273,8 +278,10 @@ namespace asmr.one
                             works.Add(id, work);
                         }
                     }
+                    if(p%100==0)
+                        Console.WriteLine("Fetching {0} page", p);
                     //防止请求过快
-                    Thread.Sleep(500);
+                    Thread.Sleep(300);
                 }
                 Console.WriteLine("Fetch Work List Done {0}/{1}",works.Count,total_count);
             }
