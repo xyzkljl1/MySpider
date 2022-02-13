@@ -134,8 +134,9 @@ namespace asmr.one
                     if (done)
                     {
                         Thread.Sleep(3000);//略微等待，防止文件正在写入
+                        Console.WriteLine(String.Format("Moving {0}", work.RJ));
                         //Directory没有copy，Move不能跨卷移动
-                        foreach(var file in work.files)
+                        foreach (var file in work.files)
                         {
                             var dir = dest_dir + "/" + file.subdir;
                             if (!Directory.Exists(dir))
@@ -193,12 +194,20 @@ namespace asmr.one
                     foreach (var track in tracks)
                         ParseTracks(work, "", track.ToObject<JObject>());
                     foreach(var file in work.files)
-                    {
-                        var dir = TmpDir + "/" + work.title + "/" + file.subdir;
-                        if (!Directory.Exists(dir))
-                            Directory.CreateDirectory(dir);
-                        idm.SendLinkToIDM(file.url, "", "", "", "", "",dir , file.name, 0x01 /*| 0x02*/);
-                    }
+                        try
+                        {
+                            var dir = TmpDir + "/" + work.title + "/" + file.subdir;
+                            if (!Directory.Exists(dir))
+                                Directory.CreateDirectory(dir);
+                            idm.SendLinkToIDM(file.url, "", "", "", "", "",dir , file.name, 0x01 /*| 0x02*/);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(ex.ToString());
+                            Console.WriteLine(ex.StackTrace);
+                            Console.WriteLine(TmpDir + "/" + work.title + "/" + file.subdir);
+                            Console.WriteLine(work.RJ);
+                        }
                     work.status = Work.Status.Downloading;
                     ct++;
                     if (ct > limit)
@@ -216,7 +225,9 @@ namespace asmr.one
             if (json.Value<String>("type")=="folder")
             {
                 var dir=parent+"/"+json.Value<String>("title");
-                if(json.ContainsKey("children"))
+                //由于谜之原因，目录里会有非法字符，实例RJ047447
+                dir=Regex.Replace(dir, "[/\\\\?*<>:\"|.]", "_");
+                if (json.ContainsKey("children"))
                     foreach (var item in json.Value<JArray>("children"))
                         ParseTracks(work, dir, item.ToObject<JObject>());
             }
