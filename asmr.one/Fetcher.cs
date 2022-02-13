@@ -165,7 +165,7 @@ namespace asmr.one
                 }
             Console.Write(String.Format("Downloading Check {0} ", downloading_works.Count));
             foreach (var work in downloading_works)
-                Console.Write(work);
+                Console.Write(work+" ");
             Console.WriteLine();
         }
         private async Task Download(int limit)
