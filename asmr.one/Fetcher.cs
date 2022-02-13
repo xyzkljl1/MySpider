@@ -93,7 +93,7 @@ namespace asmr.one
                 {
                     if (index % (24 * 14) == 0)//每2周
                         await FetchWorkList();
-                    await Download(1);
+                    await Download(15);
                     CheckDownload();
                     Thread.Sleep(1000 * 60 * 60);//每小时一次
                     index++;
