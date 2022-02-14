@@ -189,7 +189,10 @@ namespace asmr.one
                     else if (!eliminated.Contains(id))
                         need_download = true;
                     if (!need_download)
+                    {
+                        work.status=Work.Status.Done;
                         continue;
+                    }
                     var tracks= (JArray)JsonConvert.DeserializeObject(await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id)));
                     foreach (var track in tracks)
                         ParseTracks(work, "", track.ToObject<JObject>());
@@ -210,9 +213,20 @@ namespace asmr.one
                         }
                     work.status = Work.Status.Downloading;
                     ct++;
-                    if (ct > limit)
+                    if (ct >= limit)
                         break;
                 }
+            {
+                int process_ct = 0, wait_ct = 0, done_ct = 0;
+                foreach (var pair in works)
+                    if (pair.Value.status == Work.Status.Downloading)
+                        process_ct++;
+                    else if(pair.Value.status == Work.Status.Waiting)
+                            wait_ct++;
+                    else if(pair.Value.status == Work.Status.Done)
+                            done_ct++;
+                Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready",wait_ct,process_ct,done_ct);
+            }
         }
         private void ParseTracks(Work work,String parent,JObject json)
         {
@@ -224,17 +238,19 @@ namespace asmr.one
                 return;
             if (json.Value<String>("type")=="folder")
             {
-                var dir=parent+"/"+json.Value<String>("title");
-                //由于谜之原因，目录里会有非法字符，实例RJ047447
-                dir=Regex.Replace(dir, "[/\\\\?*<>:\"|.]", "_");
+                //由于谜之原因，目录里会有非法字符，如RJ047447
+                //可能有多于1级目录，因此不替换/
+                //部分作品自带乱码，如RJ066580
+                var dir = parent + "/" + Regex.Replace(json.Value<String>("title"), "[\\\\?*<>:\"|.]", "_");
+                dir=Regex.Replace(dir, "[\\\\?*<>:\"|.]", "_");
                 if (json.ContainsKey("children"))
                     foreach (var item in json.Value<JArray>("children"))
                         ParseTracks(work, dir, item.ToObject<JObject>());
             }
             else if(json.ContainsKey("mediaDownloadUrl"))
-                work.files.Add(new Work.File_(json.Value<String>("title"), parent, json.Value<String>("mediaDownloadUrl")));
+                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|.]", "_"), parent, json.Value<String>("mediaDownloadUrl")));
             else if(json.ContainsKey("mediaStreamUrl"))
-                work.files.Add(new Work.File_(json.Value<String>("title"), parent, json.Value<String>("mediaStreamUrl")));
+                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|.]", "_"), parent, json.Value<String>("mediaStreamUrl")));
         }
         private Dictionary<int,List<String>> GetAlterWorks()
         {
