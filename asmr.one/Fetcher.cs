@@ -248,9 +248,9 @@ namespace asmr.one
                         ParseTracks(work, dir, item.ToObject<JObject>());
             }
             else if(json.ContainsKey("mediaDownloadUrl"))
-                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|.]", "_"), parent, json.Value<String>("mediaDownloadUrl")));
+                work.files.Add(new Work.File_(json.Value<String>("title"), parent, json.Value<String>("mediaDownloadUrl")));
             else if(json.ContainsKey("mediaStreamUrl"))
-                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|.]", "_"), parent, json.Value<String>("mediaStreamUrl")));
+                work.files.Add(new Work.File_(json.Value<String>("title"), parent, json.Value<String>("mediaStreamUrl")));
         }
         private Dictionary<int,List<String>> GetAlterWorks()
         {
