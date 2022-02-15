@@ -90,7 +90,8 @@ namespace asmr.one
                     return;
                 }
                 //清理临时目录
-                Directory.Delete(TmpDir, true);
+                if (Directory.Exists(TmpDir))
+                    Directory.Delete(TmpDir, true);
                 Directory.CreateDirectory(TmpDir);
                 while (true)
                 {

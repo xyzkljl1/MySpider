@@ -76,7 +76,8 @@ namespace japaneseasmr.com
         public async Task Start()
         {
             int index=0;
-            Directory.Delete(TmpDir, true);
+            if (Directory.Exists(TmpDir))
+                Directory.Delete(TmpDir, true);
             Directory.CreateDirectory(TmpDir);
             while (true)
             {
