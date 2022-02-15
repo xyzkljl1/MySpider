@@ -202,6 +202,14 @@ namespace asmr.one
                         ParseTracks(work, "", track.ToObject<JObject>());
                     foreach(var file in work.files)
                     {
+                        //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，只好直接排除
+                        {
+                            var request = new HttpRequestMessage(HttpMethod.Head, "https://download.asmr.one/media/download/voice/%E6%8C%89%E7%85%A7RJ%E5%8F%B7%E5%91%BD%E5%90%8D%E7%9A%84%E4%BD%9C%E5%93%81/RJ051403%20%E3%82%B9%E3%83%B3%E3%83%89%E3%83%A1/CV.%E7%B4%97%E8%97%A4%E3%81%BE%E3%81%97%E3%82%8D.txt");
+                            var response = await httpClient.SendAsync(request);
+                            if (response.IsSuccessStatusCode)
+                                if(response.Content.Headers.Contains("Content-Length")&&response.Content.Headers.GetValues("Content-Length").First()=="0")//字符串
+                                    continue;
+                        }
                         var dir = TmpDir + "/" + work.title + "/" + file.subdir;
                         if (!Directory.Exists(dir))
                             Directory.CreateDirectory(dir);
