@@ -244,10 +244,12 @@ namespace asmr.one
                     foreach (var item in json.Value<JArray>("children"))
                         ParseTracks(work, dir, item.ToObject<JObject>());
             }
-            else if(json.ContainsKey("mediaDownloadUrl"))
-                work.files.Add(new Work.File_(json.Value<String>("title"), parent, json.Value<String>("mediaDownloadUrl")));
+            //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
+            //如果不替换则IDM会自动替换非法字符为-
+            else if (json.ContainsKey("mediaDownloadUrl"))
+                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, json.Value<String>("mediaDownloadUrl")));
             else if(json.ContainsKey("mediaStreamUrl"))
-                work.files.Add(new Work.File_(json.Value<String>("title"), parent, json.Value<String>("mediaStreamUrl")));
+                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, json.Value<String>("mediaStreamUrl")));
         }
         private Dictionary<int,List<String>> GetAlterWorks()
         {
