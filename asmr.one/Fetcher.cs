@@ -201,20 +201,13 @@ namespace asmr.one
                     foreach (var track in tracks)
                         ParseTracks(work, "", track.ToObject<JObject>());
                     foreach(var file in work.files)
-                        try
-                        {
-                            var dir = TmpDir + "/" + work.title + "/" + file.subdir;
-                            if (!Directory.Exists(dir))
-                                Directory.CreateDirectory(dir);
-                            idm.SendLinkToIDM(file.url, "", "", "", "", "",dir , file.name, 0x01 /*| 0x02*/);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine(ex.ToString());
-                            Console.WriteLine(ex.StackTrace);
-                            Console.WriteLine(TmpDir + "/" + work.title + "/" + file.subdir);
-                            Console.WriteLine(work.RJ);
-                        }
+                    {
+                        var dir = TmpDir + "/" + work.title + "/" + file.subdir;
+                        if (!Directory.Exists(dir))
+                            Directory.CreateDirectory(dir);
+                        //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？
+                        idm.SendLinkToIDM(file.url, "", "", "", "", "", dir, file.name, 0x01 /*| 0x02*/);
+                    }
                     work.status = Work.Status.Downloading;
                     ct++;
                     if (ct >= limit)
@@ -226,9 +219,9 @@ namespace asmr.one
                     if (pair.Value.status == Work.Status.Downloading)
                         process_ct++;
                     else if(pair.Value.status == Work.Status.Waiting)
-                            wait_ct++;
+                        wait_ct++;
                     else if(pair.Value.status == Work.Status.Done)
-                            done_ct++;
+                        done_ct++;
                 Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready",wait_ct,process_ct,done_ct);
             }
         }
