@@ -28,7 +28,7 @@ namespace japaneseasmr.com
     {
         private String RootDir = "G:/ASMR_Unreliable";
         private String RootDirR = "G:/ASMR_UnreliableR";
-        private String TmpDir = "E:/Tmp/MySpider";
+        private String TmpDir = "E:/Tmp/MySpider/JASMR";
         public String query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
         private HttpClient httpClient;
@@ -76,7 +76,9 @@ namespace japaneseasmr.com
         public async Task Start()
         {
             int index=0;
-            while(true)
+            Directory.Delete(TmpDir, true);
+            Directory.CreateDirectory(TmpDir);
+            while (true)
             {
                 if(index%(24*14)==0)//每周
                 {
@@ -151,7 +153,8 @@ namespace japaneseasmr.com
             try
             {
                 var eliminated = await GetEliminatedWorks();
-                var processed_works =works.Take(ct).ToDictionary(kv=>kv.Key,kv=>kv.Value);
+                var processed_works =works.Take(works.Count).ToDictionary(kv=>kv.Key,kv=>kv.Value);
+                int success_ct = 0;
                 foreach (var work_pair in processed_works)
                 {
                     var id = work_pair.Key;
@@ -242,6 +245,9 @@ namespace japaneseasmr.com
                     {
                         work.fail_ct = 0;
                         downloading_works.Add(id, work);
+                        success_ct++;
+                        if (success_ct >= ct)
+                            break;
                     }
                 }
                 Console.WriteLine(String.Format("Process Download Queue {0}", works.Count));
