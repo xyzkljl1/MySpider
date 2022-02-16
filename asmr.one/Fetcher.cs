@@ -199,21 +199,13 @@ namespace asmr.one
                     }
                     var tracks= (JArray)JsonConvert.DeserializeObject(await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id)));
                     foreach (var track in tracks)
-                        ParseTracks(work, "", track.ToObject<JObject>());
+                        await ParseTracks(work, "", track.ToObject<JObject>());
                     foreach(var file in work.files)
                     {
-                        //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，只好直接排除
-                        {
-                            var request = new HttpRequestMessage(HttpMethod.Head, "https://download.asmr.one/media/download/voice/%E6%8C%89%E7%85%A7RJ%E5%8F%B7%E5%91%BD%E5%90%8D%E7%9A%84%E4%BD%9C%E5%93%81/RJ051403%20%E3%82%B9%E3%83%B3%E3%83%89%E3%83%A1/CV.%E7%B4%97%E8%97%A4%E3%81%BE%E3%81%97%E3%82%8D.txt");
-                            var response = await httpClient.SendAsync(request);
-                            if (response.IsSuccessStatusCode)
-                                if(response.Content.Headers.Contains("Content-Length")&&response.Content.Headers.GetValues("Content-Length").First()=="0")//字符串
-                                    continue;
-                        }
                         var dir = TmpDir + "/" + work.title + "/" + file.subdir;
                         if (!Directory.Exists(dir))
                             Directory.CreateDirectory(dir);
-                        //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？
+                        //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
                         idm.SendLinkToIDM(file.url, "", "", "", "", "", dir, file.name, 0x01 /*| 0x02*/);
                     }
                     work.status = Work.Status.Downloading;
@@ -233,7 +225,7 @@ namespace asmr.one
                 Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready",wait_ct,process_ct,done_ct);
             }
         }
-        private void ParseTracks(Work work,String parent,JObject json)
+        private async Task ParseTracks(Work work,String parent,JObject json)
         {
             if (json == null)
                 return;
@@ -250,14 +242,21 @@ namespace asmr.one
                 dir=Regex.Replace(dir, "[\\\\?*<>:\"|.]", "_");
                 if (json.ContainsKey("children"))
                     foreach (var item in json.Value<JArray>("children"))
-                        ParseTracks(work, dir, item.ToObject<JObject>());
+                        await ParseTracks(work, dir, item.ToObject<JObject>());
             }
-            //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
-            //如果不替换则IDM会自动替换非法字符为-
-            else if (json.ContainsKey("mediaDownloadUrl"))
-                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, json.Value<String>("mediaDownloadUrl")));
-            else if(json.ContainsKey("mediaStreamUrl"))
-                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, json.Value<String>("mediaStreamUrl")));
+            else if (json.ContainsKey("mediaDownloadUrl")|| json.ContainsKey("mediaStreamUrl"))
+            {
+                var url = json.ContainsKey("mediaDownloadUrl") ? json.Value<String>("mediaDownloadUrl") : json.Value<String>("mediaStreamUrl");
+                //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，只好直接排除
+                var request = new HttpRequestMessage(HttpMethod.Head, url);
+                var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                    if (response.Content.Headers.Contains("Content-Length") && response.Content.Headers.GetValues("Content-Length").First() == "0")//字符串
+                        return;
+                //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
+                //如果不替换则IDM会自动替换非法字符为-
+                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, url));
+            }
         }
         private Dictionary<int,List<String>> GetAlterWorks()
         {
