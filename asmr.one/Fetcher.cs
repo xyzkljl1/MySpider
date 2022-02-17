@@ -47,7 +47,7 @@ namespace asmr.one
     {
         private enum RequestResult{
             Good,
-            Zero,
+            Skip,
             Bad
         };
         private String RootDir = "G:/ASMR_Reliable";
@@ -62,7 +62,7 @@ namespace asmr.one
         private DateTime LastFetchTime =DateTime.MinValue;
         String bearer_token="";
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
-
+        private List<String> suffixs=new List<string> { ".mp3",".wav",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa" };
         public Fetcher() {
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             {
@@ -232,7 +232,7 @@ namespace asmr.one
                 Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready",wait_ct,process_ct,done_ct);
             }
         }
-        private async Task<RequestResult> CheckURL(string url)
+        private async Task<RequestResult> CheckURL(string url,bool is_audio)
         {
             if (url == "" || url is null)
                 return RequestResult.Bad;
@@ -244,8 +244,12 @@ namespace asmr.one
                 {
                     if (response.Content.Headers.Contains("Content-Length"))
                     {
-                        if (response.Content.Headers.GetValues("Content-Length").First() == "0")//字符串
-                            return RequestResult.Zero;
+                        //单位:byte，排除小于100KB的音频，以避免坑爹的情况，如RJ066580
+                        var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
+                        if (len == 0)//字符串
+                            return RequestResult.Skip;
+                        else if(is_audio&&len<1024*100)
+                            return RequestResult.Skip;
                         else
                             return RequestResult.Good;
                     }
@@ -260,6 +264,14 @@ namespace asmr.one
                 Console.WriteLine(ex.StackTrace);
             }
             return RequestResult.Bad;
+        }
+        private bool IsAudio(String title)
+        {
+            var tmp = title.ToLower();
+            foreach (var suffix in suffixs)
+                if (title.EndsWith(suffix))
+                    return true;
+            return false;
         }
         private async Task ParseTracks(Work work,String parent,JObject json)
         {
@@ -285,8 +297,10 @@ namespace asmr.one
                 var url_download = json.Value<String>("mediaDownloadUrl");
                 //stream_url要加上token
                 var url_stream = json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
-                var ret_download = await CheckURL(url_download);
-                var ret_stream = await CheckURL(url_stream);
+                var title = Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_");
+                bool is_audio = IsAudio(title);
+                var ret_download = await CheckURL(url_download, is_audio);
+                var ret_stream = await CheckURL(url_stream, is_audio);
                 String url = null;
                 //个别文件的downloadurl无效，而streamurl有效，如RJ061291
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
@@ -295,18 +309,18 @@ namespace asmr.one
                     url = url_download;
                 else if (ret_stream == RequestResult.Good)
                     url = url_stream;
-                else if (ret_download == RequestResult.Zero && ret_stream == RequestResult.Zero)//两个都为zero则不下载
+                else if (ret_download == RequestResult.Skip && ret_stream == RequestResult.Skip)//两个都为zero则不下载
                     url = null;
-                else if (ret_download == RequestResult.Zero)//一个为Zero一个为Bad则选择Bad
+                else if (ret_download == RequestResult.Skip)//一个为Zero一个为Bad则选择Bad
                     url = url_stream;
-                else if (ret_stream == RequestResult.Zero)
+                else if (ret_stream == RequestResult.Skip)
                     url = url_download;
                 else//都为Bad则选择第一个
                     url = url_download;
                 //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
                 //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
-                    work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, url));
+                    work.files.Add(new Work.File_(title, parent, url));
             }
         }
         private Dictionary<int,List<String>> GetAlterWorks()
