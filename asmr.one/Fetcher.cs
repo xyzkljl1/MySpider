@@ -97,8 +97,8 @@ namespace asmr.one
                 {
                     if (index % (24 * 7 * 2 * 2) == 0)//每2周
                         await FetchWorkList();
-                    //一次下载太多会有429 Too Many Requests
-                    await Download(7);
+                    //一次下载太多会有429 Too Many Requests?
+                    await Download(13);
                     CheckDownload();
                     Thread.Sleep(1000 * 30 * 60);//每半小时一次
                     index++;
@@ -163,6 +163,7 @@ namespace asmr.one
                         {
                             work.fail_ct = 0;
                             work.status = Work.Status.Waiting;
+                            work.files.Clear();
                         }
                         else
                             downloading_works.Add(work.RJ);
@@ -249,10 +250,19 @@ namespace asmr.one
                 var url = json.ContainsKey("mediaDownloadUrl") ? json.Value<String>("mediaDownloadUrl") : json.Value<String>("mediaStreamUrl");
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，只好直接排除
                 var request = new HttpRequestMessage(HttpMethod.Head, url);
-                var response = await httpClient.SendAsync(request);
-                if (response.IsSuccessStatusCode)
-                    if (response.Content.Headers.Contains("Content-Length") && response.Content.Headers.GetValues("Content-Length").First() == "0")//字符串
-                        return;
+                try
+                {
+                    var response = await httpClient.SendAsync(request);
+                    if (response.IsSuccessStatusCode)
+                        if (response.Content.Headers.Contains("Content-Length") && response.Content.Headers.GetValues("Content-Length").First() == "0")//字符串
+                            return;
+                }
+                catch (Exception ex)
+                {
+                    //请求失败什么都不做
+                    Console.WriteLine("Exception:" + ex.Message);
+                    Console.WriteLine(ex.StackTrace);
+                }
                 //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
                 //如果不替换则IDM会自动替换非法字符为-
                 work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, url));
