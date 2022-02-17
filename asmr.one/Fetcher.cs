@@ -45,6 +45,11 @@ namespace asmr.one
     }
     class Fetcher
     {
+        private enum RequestResult{
+            Good,
+            Zero,
+            Bad
+        };
         private String RootDir = "G:/ASMR_Reliable";
         private String RootDirR = "G:/ASMR_ReliableR";
         //如果某作品处于以下目录，则删除它们并强制重新下载
@@ -55,6 +60,7 @@ namespace asmr.one
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
         private DateTime LastFetchTime =DateTime.MinValue;
+        String bearer_token="";
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
 
         public Fetcher() {
@@ -226,6 +232,35 @@ namespace asmr.one
                 Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready",wait_ct,process_ct,done_ct);
             }
         }
+        private async Task<RequestResult> CheckURL(string url)
+        {
+            if (url == "" || url is null)
+                return RequestResult.Bad;
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Head, url);
+                var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    if (response.Content.Headers.Contains("Content-Length"))
+                    {
+                        if (response.Content.Headers.GetValues("Content-Length").First() == "0")//字符串
+                            return RequestResult.Zero;
+                        else
+                            return RequestResult.Good;
+                    }
+                    else//有的content类型不带length
+                        return RequestResult.Good;
+                }
+            }
+            catch (Exception ex)
+            {
+                //请求失败什么都不做
+                Console.WriteLine("Check URL Bad:" + ex.Message);
+                Console.WriteLine(ex.StackTrace);
+            }
+            return RequestResult.Bad;
+        }
         private async Task ParseTracks(Work work,String parent,JObject json)
         {
             if (json == null)
@@ -247,25 +282,31 @@ namespace asmr.one
             }
             else if (json.ContainsKey("mediaDownloadUrl")|| json.ContainsKey("mediaStreamUrl"))
             {
-                var url = json.ContainsKey("mediaDownloadUrl") ? json.Value<String>("mediaDownloadUrl") : json.Value<String>("mediaStreamUrl");
-                //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，只好直接排除
-                var request = new HttpRequestMessage(HttpMethod.Head, url);
-                try
-                {
-                    var response = await httpClient.SendAsync(request);
-                    if (response.IsSuccessStatusCode)
-                        if (response.Content.Headers.Contains("Content-Length") && response.Content.Headers.GetValues("Content-Length").First() == "0")//字符串
-                            return;
-                }
-                catch (Exception ex)
-                {
-                    //请求失败什么都不做
-                    Console.WriteLine("Exception:" + ex.Message);
-                    Console.WriteLine(ex.StackTrace);
-                }
+                var url_download = json.Value<String>("mediaDownloadUrl");
+                //stream_url要加上token
+                var url_stream = json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
+                var ret_download = await CheckURL(url_download);
+                var ret_stream = await CheckURL(url_stream);
+                String url = null;
+                //个别文件的downloadurl无效，而streamurl有效，如RJ061291
+                //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
+                //请求失败可能是短暂的网络错误，出现Bad时仍然下载
+                if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download总是优先于url_stream
+                    url = url_download;
+                else if (ret_stream == RequestResult.Good)
+                    url = url_stream;
+                else if (ret_download == RequestResult.Zero && ret_stream == RequestResult.Zero)//两个都为zero则不下载
+                    url = null;
+                else if (ret_download == RequestResult.Zero)//一个为Zero一个为Bad则选择Bad
+                    url = url_stream;
+                else if (ret_stream == RequestResult.Zero)
+                    url = url_download;
+                else//都为Bad则选择第一个
+                    url = url_download;
                 //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
                 //如果不替换则IDM会自动替换非法字符为-
-                work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, url));
+                if(!(url is null))
+                    work.files.Add(new Work.File_(Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_"), parent, url));
             }
         }
         private Dictionary<int,List<String>> GetAlterWorks()
@@ -341,7 +382,7 @@ namespace asmr.one
             if(jdoc != null)
                 if (jdoc.ContainsKey("token"))
                 {
-                    var bearer_token = jdoc.Value<String>("token");
+                    bearer_token = jdoc.Value<String>("token");
                     //可以再get验证一下，但是没必要
                     httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer",bearer_token);
                     return true;
