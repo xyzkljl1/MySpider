@@ -213,7 +213,16 @@ namespace asmr.one
                         if (!Directory.Exists(dir))
                             Directory.CreateDirectory(dir);
                         //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
-                        idm.SendLinkToIDM(file.url, "", "", "", "", "", dir, file.name, 0x01 /*| 0x02*/);
+                        try
+                        {
+                            idm.SendLinkToIDM(file.url, "", "", "", "", "", dir, file.name, 0x01 /*| 0x02*/);
+                        }
+                        catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
+                        {
+                            Console.WriteLine("SendLinkToIDM Fail:" + ex.Message);
+                            Console.WriteLine("Abort Downloading Try");
+                            return;
+                        }
                     }
                     work.status = Work.Status.Downloading;
                     ct++;
@@ -244,11 +253,11 @@ namespace asmr.one
                 {
                     if (response.Content.Headers.Contains("Content-Length"))
                     {
-                        //单位:byte，排除小于100KB的音频，以避免坑爹的情况，如RJ066580
+                        //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
                         var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
                         if (len == 0)//字符串
                             return RequestResult.Skip;
-                        else if(is_audio&&len<1024*100)
+                        else if(is_audio&&len<1024*200)
                             return RequestResult.Skip;
                         else
                             return RequestResult.Good;
