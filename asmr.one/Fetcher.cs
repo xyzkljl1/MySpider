@@ -89,16 +89,16 @@ namespace asmr.one
         {
             try {
                 int index = 0;
+                //清理临时目录
+                if (Directory.Exists(TmpDir))
+                    Directory.Delete(TmpDir, true);
+                Directory.CreateDirectory(TmpDir);
                 if (!await Login())
                 {
                     Console.WriteLine("Login Fail,Exiting...");
                     Thread.Sleep(100000);
                     return;
                 }
-                //清理临时目录
-                if (Directory.Exists(TmpDir))
-                    Directory.Delete(TmpDir, true);
-                Directory.CreateDirectory(TmpDir);
                 while (true)
                 {
                     if (index % (24 * 7 * 2 * 2) == 0)//每2周
