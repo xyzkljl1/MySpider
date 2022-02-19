@@ -116,7 +116,17 @@ namespace asmr.one
                 Console.WriteLine(ex.StackTrace);
             }
         }
-
+        String FileNameCheck(String name)//检查单级目录/文件名是否合法
+        {
+            String ret = name;
+            ret = Regex.Replace(ret, "[/\\\\?*<>:\"|]", "_");
+            /* 目录以空格结尾会导致windows和IDM的bug
+             * 该目录无法正常删除(可通过压缩文件勾选删除源文件删除)，且打开无空格版本目录会导向该目录
+             */
+            while (ret.EndsWith(" "))
+                ret=ret.Substring(0, ret.Length-1);
+            return ret;
+        }
         private void CheckDownload()
         {
             var downloading_works = new List<String>();
@@ -293,10 +303,15 @@ namespace asmr.one
             if (json.Value<String>("type")=="folder")
             {
                 //由于谜之原因，目录里会有非法字符，如RJ047447
-                //可能有多于1级目录，因此不替换/
                 //部分作品自带乱码，如RJ066580
-                var dir = parent + "/" + Regex.Replace(json.Value<String>("title"), "[\\\\?*<>:\"|.]", "_");
-                dir=Regex.Replace(dir, "[\\\\?*<>:\"|.]", "_");
+                //可能有多于1级目录，此时拆开分别检查
+                var dir = parent;
+                foreach (var sub_dir in json.Value<String>("title").Split(new char[]{ '\\','/'}))
+                {
+                    var tmp= FileNameCheck(sub_dir);
+                    if (tmp != "")
+                        dir += "/" + tmp;
+                }
                 if (json.ContainsKey("children"))
                     foreach (var item in json.Value<JArray>("children"))
                         await ParseTracks(work, dir, item.ToObject<JObject>());
@@ -306,7 +321,7 @@ namespace asmr.one
                 var url_download = json.Value<String>("mediaDownloadUrl");
                 //stream_url要加上token
                 var url_stream = json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
-                var title = Regex.Replace(json.Value<String>("title"), "[/\\\\?*<>:\"|]", "_");
+                var title = FileNameCheck(json.Value<String>("title"));
                 bool is_audio = IsAudio(title);
                 var ret_download = await CheckURL(url_download, is_audio);
                 var ret_stream = await CheckURL(url_stream, is_audio);
@@ -378,10 +393,10 @@ namespace asmr.one
                         {
                             var work = new Work();
                             work.r = work_object.Value<Boolean>("nsfw");
-                            //id即是RJ号，前面补0；信任该网站给出的title
+                            //id即是RJ号，前面补0；使用该网站给出的title，title可能为空如RJ087362
                             work.RJ = String.Format("RJ{0:D6}", id);
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
-                            work.title = Regex.Replace(work.title, "[/\\\\?*<>:\"|.]", "_");
+                            work.title = FileNameCheck(work.title);
                             works.Add(id, work);
                         }
                     }
