@@ -122,8 +122,9 @@ namespace asmr.one
             ret = Regex.Replace(ret, "[/\\\\?*<>:\"|]", "_");
             /* 目录以空格结尾会导致windows和IDM的bug
              * 该目录无法正常删除(可通过压缩文件勾选删除源文件删除)，且打开无空格版本目录会导向该目录
+             * 似乎以.结尾也会有问题
              */
-            while (ret.EndsWith(" "))
+            while (ret.EndsWith(" ")||ret.EndsWith("."))
                 ret=ret.Substring(0, ret.Length-1);
             return ret;
         }
@@ -192,6 +193,16 @@ namespace asmr.one
         }
         private async Task Download(int limit)
         {
+            try
+            {
+                if(idm is null)
+                    idm = new CIDMLinkTransmitter();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("ReCreate IDM Instance Fail，Abort Download Try:" + ex.Message);
+                return;
+            }
             var eliminated = await GetEliminatedWorks();
             var alter =GetAlterWorks();
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
@@ -230,7 +241,8 @@ namespace asmr.one
                         catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
                         {
                             Console.WriteLine("SendLinkToIDM Fail:" + ex.Message);
-                            Console.WriteLine("Abort Downloading Try");
+                            Console.WriteLine("Discard IDM Instance,Abort Downloading Try");
+                            idm = null;
                             return;
                         }
                     }
@@ -376,7 +388,7 @@ namespace asmr.one
                 var first_page = await GetJson(String.Format(base_url, 1));
                 var total_count = first_page.Value<JObject>("pagination").Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination").Value<Int32>("pageSize");
-                for(int p=0;p*page_size<total_count;p++)
+                for(int p=1;p*page_size<total_count;p++)
                 {
                     var page = await GetJson(String.Format(base_url, p+1));
                     if(page is null)
