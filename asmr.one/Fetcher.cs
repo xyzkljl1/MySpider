@@ -270,23 +270,23 @@ namespace asmr.one
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Head, url);
-                var response = await httpClient.SendAsync(request);
-                if (response.IsSuccessStatusCode)
-                {
-                    if (response.Content.Headers.Contains("Content-Length"))
+                using (var response = await httpClient.SendAsync(request))
+                    if (response.IsSuccessStatusCode)
                     {
-                        //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
-                        var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
-                        if (len == 0)//字符串
-                            return RequestResult.Skip;
-                        else if(is_audio&&len<1024*200)
-                            return RequestResult.Skip;
-                        else
+                        if (response.Content.Headers.Contains("Content-Length"))
+                        {
+                            //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
+                            var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
+                            if (len == 0)//字符串
+                                return RequestResult.Skip;
+                            else if (is_audio && len < 1024 * 200)
+                                return RequestResult.Skip;
+                            else
+                                return RequestResult.Good;
+                        }
+                        else//有的content类型不带length
                             return RequestResult.Good;
                     }
-                    else//有的content类型不带length
-                        return RequestResult.Good;
-                }
             }
             catch (Exception ex)
             {
@@ -427,8 +427,9 @@ namespace asmr.one
         }
         public async Task<bool> Login()
         {
-
-            var jdoc = await PostJson("https://api.asmr.one/api/auth/me", new StringContent("{\"name\": \"guest\", \"password\": \"guest\"}", Encoding.UTF8, "application/json"));
+            JObject jdoc = null;
+            using (var content=new StringContent("{\"name\": \"guest\", \"password\": \"guest\"}", Encoding.UTF8, "application/json"))
+                jdoc = await PostJson("https://api.asmr.one/api/auth/me", content);
             if(jdoc != null)
                 if (jdoc.ContainsKey("token"))
                 {
@@ -466,13 +467,15 @@ namespace asmr.one
             for (int i = 12; i > 0; --i)
                 try
                 {
-                    HttpResponseMessage response = await httpClient.GetAsync(addr);
-                    if (!response.IsSuccessStatusCode)
+                    using (HttpResponseMessage response = await httpClient.GetAsync(addr))
                     {
-                        Console.WriteLine(await response.Content.ReadAsStringAsync());
-                        throw new Exception("HTTP Not Success");
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            Console.WriteLine(await response.Content.ReadAsStringAsync());
+                            throw new Exception("HTTP Not Success");
+                        }
+                        return await response.Content.ReadAsStringAsync();
                     }
-                    return await response.Content.ReadAsStringAsync();
                 }
                 catch (Exception e)
                 {
@@ -487,10 +490,12 @@ namespace asmr.one
             for (int i = 12; i > 0; --i)
                 try
                 {
-                    HttpResponseMessage response = await httpClient.PostAsync(addr,data);
-                    if (!response.IsSuccessStatusCode)
-                        throw new Exception("HTTP Not Success");
-                    return await response.Content.ReadAsStringAsync();
+                    using (HttpResponseMessage response = await httpClient.PostAsync(addr, data))
+                    {
+                        if (!response.IsSuccessStatusCode)
+                            throw new Exception("HTTP Not Success");
+                        return await response.Content.ReadAsStringAsync();
+                    }
                 }
                 catch (Exception e)
                 {

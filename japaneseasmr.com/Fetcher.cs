@@ -321,10 +321,12 @@ namespace japaneseasmr.com
             for(int i=12;i>0;--i)
                 try
                 {
-                    HttpResponseMessage response = await httpClient.GetAsync(addr);
-                    if (!response.IsSuccessStatusCode)
-                        throw new Exception("HTTP Not Success");
-                    return await response.Content.ReadAsStringAsync();
+                    using (HttpResponseMessage response = await httpClient.GetAsync(addr))
+                    {
+                        if (!response.IsSuccessStatusCode)
+                            throw new Exception("HTTP Not Success");
+                        return await response.Content.ReadAsStringAsync();
+                    }
                 }
                 catch (Exception e)
                 {
@@ -339,10 +341,12 @@ namespace japaneseasmr.com
             for (int i = 12; i > 0; --i)
                 try
                 {
-                    HttpResponseMessage response = await httpClient_redirect.GetAsync(addr);
-                    if(response.Headers.Location is null)
-                        throw new Exception("HTTP Not Success");
-                    return response.Headers.Location.ToString();
+                    using (HttpResponseMessage response = await httpClient_redirect.GetAsync(addr))
+                    {
+                        if (response.Headers.Location is null)
+                            throw new Exception("HTTP Not Success");
+                        return response.Headers.Location.ToString();
+                    }
                 }
                 catch (Exception e)
                 {
