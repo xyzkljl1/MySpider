@@ -270,24 +270,24 @@ namespace asmr.one
                 return RequestResult.Bad;
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Head, url);
-                using (var response = await httpClient.SendAsync(request))
-                    if (response.IsSuccessStatusCode)
-                    {
-                        if (response.Content.Headers.Contains("Content-Length"))
+                using (var request = new HttpRequestMessage(HttpMethod.Head, url))
+                    using (var response = await httpClient.SendAsync(request))
+                        if (response.IsSuccessStatusCode)
                         {
-                            //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
-                            var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
-                            if (len == 0)//字符串
-                                return RequestResult.Skip;
-                            else if (is_audio && len < 1024 * 200)
-                                return RequestResult.Skip;
-                            else
+                            if (response.Content.Headers.Contains("Content-Length"))
+                            {
+                                //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
+                                var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
+                                if (len == 0)//字符串
+                                    return RequestResult.Skip;
+                                else if (is_audio && len < 1024 * 200)
+                                    return RequestResult.Skip;
+                                else
+                                    return RequestResult.Good;
+                            }
+                            else//有的content类型不带length
                                 return RequestResult.Good;
                         }
-                        else//有的content类型不带length
-                            return RequestResult.Good;
-                    }
             }
             catch (Exception ex)
             {
