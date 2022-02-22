@@ -155,7 +155,6 @@ namespace asmr.one
                     if (done)
                     {
                         Thread.Sleep(3000);//略微等待，防止文件正在写入
-                        Console.WriteLine(String.Format("Moving {0}", work.RJ));
                         //Directory没有copy，Move不能跨卷移动
                         foreach (var file in work.files)
                         {
@@ -171,6 +170,8 @@ namespace asmr.one
                             Console.WriteLine("Remove {0}", dir);
                         }
                         work.status = Work.Status.Done;
+                        work.alter_dir.Clear();
+                        work.files.Clear();
                         Console.WriteLine(String.Format("Download {0} Done", work.RJ));
                     }
                     else
