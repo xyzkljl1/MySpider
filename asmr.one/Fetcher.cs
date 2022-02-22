@@ -113,10 +113,10 @@ namespace asmr.one
                 Task.Run(() => SendingIDMTask());
                 while (true)
                 {
-                    if (index % (24 * 7 * 2 * (1000*60*60/download_interval)) == 0)//每2周
+                    if (index % (24 * 7 * 2 * 1000*60*60/download_interval) == 0)//每2周
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
-                    await Download(13);
+                    await Download(25);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -249,7 +249,7 @@ namespace asmr.one
                     else
                     {
                         work.fail_ct++;
-                        if (work.fail_ct > 48 * 2)//两天没下载完视作失败
+                        if (work.fail_ct > 2 * (1000 * 60 * 60*24 / download_interval))//两天没下载完视作失败
                         {
                             work.fail_ct = 0;
                             work.status = Work.Status.Waiting;
@@ -448,7 +448,7 @@ namespace asmr.one
                 var first_page = await GetJson(String.Format(base_url, 1));
                 var total_count = first_page.Value<JObject>("pagination").Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination").Value<Int32>("pageSize");
-                for(int p=0;p*page_size<total_count;p++)
+                for(int p=0;p*page_size<total_count;p++)//变量p从0开始,页数为p+1
                 {
                     var page = await GetJson(String.Format(base_url, p+1));
                     if(page is null)
