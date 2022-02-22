@@ -15,6 +15,12 @@ using System.Threading;
 
 namespace asmr.one
 {
+    public struct IDMTask
+    {
+        public string name;
+        public string dir;
+        public string url;
+    }
     class Work
     {
         public enum Status
@@ -63,6 +69,9 @@ namespace asmr.one
         String bearer_token="";
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa" };
+        private Queue<IDMTask> tasks=new Queue<IDMTask>();
+        private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
+        private int test_id= -1;
         public Fetcher() {
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             {
@@ -87,7 +96,8 @@ namespace asmr.one
         }
         public async Task Start()
         {
-            try {
+            try
+            {
                 int index = 0;
                 //清理临时目录
                 if (Directory.Exists(TmpDir))
@@ -99,14 +109,16 @@ namespace asmr.one
                     Thread.Sleep(100000);
                     return;
                 }
+                //将IDM任务分散发送以避免拥堵
+                Task.Run(() => SendingIDMTask());
                 while (true)
                 {
-                    if (index % (24 * 7 * 2 * 2) == 0)//每2周
+                    if (index % (24 * 7 * 2 * (1000*60*60/download_interval)) == 0)//每2周
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
                     await Download(13);
                     CheckDownload();
-                    Thread.Sleep(1000 * 30 * 60);//每半小时一次
+                    Thread.Sleep(download_interval);
                     index++;
                 }
             }
@@ -116,10 +128,70 @@ namespace asmr.one
                 Console.WriteLine(ex.StackTrace);
             }
         }
-        String FileNameCheck(String name)//检查单级目录/文件名是否合法
+        public void SendingIDMTask()
+        {
+            int interval = 10000;//每隔10s发送一次
+            int send_ct = 0;
+            try
+            {
+                while (true)
+                {
+                    lock(tasks)
+                    {
+                        if(tasks.Count>0&& download_interval > interval && interval>0)
+                        {
+                            try
+                            {
+                                if (idm is null)
+                                    idm = new CIDMLinkTransmitter();
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("ReCreate IDM Instance Fail，Abort Download Try:" + ex.Message);
+                                return;
+                            }
+                            int ct = Math.Min(tasks.Count / (download_interval / interval), 1);//根据剩余任务数量均摊，至少发送一个
+                            for(int i=0; i < ct; i++)
+                            {
+                                try
+                                {
+                                    var task = tasks.Dequeue();                        
+                                    //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
+                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, 0x01 /*| 0x02*/);
+                                }
+                                catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
+                                {
+                                    Console.WriteLine("SendLinkToIDM Fail:" + ex.Message);
+                                    Console.WriteLine("Discard IDM Instance,Abort Downloading Try");
+                                    idm = null;
+                                    return;
+                                }
+                            }
+                        }
+                        send_ct++;
+                        if (send_ct * interval > 1000 * 15 * 60)
+                        {
+                            Console.WriteLine("Left IDM Task:"+tasks.Count);
+                            send_ct = 0;
+                        }
+                    }
+                    Thread.Sleep(interval);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Fatal Exception:" + ex.Message);
+                Console.WriteLine("Stop Sending IDM Task");
+            }
+        }
+        String FileNameCheck(String name,bool is_file=false)//检查单级目录/文件名是否合法
         {
             String ret = name;
             ret = Regex.Replace(ret, "[/\\\\?*<>:\"|]", "_");
+            //由于迷之原因，如果文件名包含"母"就会被替换成"ĸ",Chrome插件可以正确下载包含"母"的文件，怀疑是IDMLib的bug
+            //暂时替换所有"母"以绕过
+            if (is_file)
+                ret = Regex.Replace(ret, "母", "mu");
             /* 目录以空格结尾会导致windows和IDM的bug
              * 该目录无法正常删除(可通过压缩文件勾选删除源文件删除)，且打开无空格版本目录会导向该目录
              * 似乎以.结尾也会有问题
@@ -194,16 +266,6 @@ namespace asmr.one
         }
         private async Task Download(int limit)
         {
-            try
-            {
-                if(idm is null)
-                    idm = new CIDMLinkTransmitter();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("ReCreate IDM Instance Fail，Abort Download Try:" + ex.Message);
-                return;
-            }
             var eliminated = await GetEliminatedWorks();
             var alter =GetAlterWorks();
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
@@ -229,23 +291,20 @@ namespace asmr.one
                     var tracks= (JArray)JsonConvert.DeserializeObject(await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id)));
                     foreach (var track in tracks)
                         await ParseTracks(work, "", track.ToObject<JObject>());
-                    foreach(var file in work.files)
+                    //有的作品tracks为空，如RJ151237
+                    //此时标记为Done以跳过
+                    if(work.files.Count==0)
                     {
-                        var dir = TmpDir + "/" + work.title + "/" + file.subdir;
+                        work.status = Work.Status.Done;
+                        continue;
+                    }
+                    foreach (var file in work.files)
+                    {
+                        var dir = TmpDir + "/" + work.title + (file.subdir==""?"":"/" + file.subdir);
                         if (!Directory.Exists(dir))
                             Directory.CreateDirectory(dir);
-                        //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
-                        try
-                        {
-                            idm.SendLinkToIDM(file.url, "", "", "", "", "", dir, file.name, 0x01 /*| 0x02*/);
-                        }
-                        catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
-                        {
-                            Console.WriteLine("SendLinkToIDM Fail:" + ex.Message);
-                            Console.WriteLine("Discard IDM Instance,Abort Downloading Try");
-                            idm = null;
-                            return;
-                        }
+                        lock (tasks)
+                            tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.name });
                     }
                     work.status = Work.Status.Downloading;
                     ct++;
@@ -334,7 +393,7 @@ namespace asmr.one
                 var url_download = json.Value<String>("mediaDownloadUrl");
                 //stream_url要加上token
                 var url_stream = json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
-                var title = FileNameCheck(json.Value<String>("title"));
+                var title = FileNameCheck(json.Value<String>("title"),true);
                 bool is_audio = IsAudio(title);
                 var ret_download = await CheckURL(url_download, is_audio);
                 var ret_stream = await CheckURL(url_stream, is_audio);
@@ -410,7 +469,16 @@ namespace asmr.one
                             work.RJ = String.Format("RJ{0:D6}", id);
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
                             work.title = FileNameCheck(work.title);
-                            works.Add(id, work);
+                            if(test_id>0)
+                            {
+                                if(id==test_id)
+                                {
+                                    works.Add(id, work);
+                                    return;
+                                }
+                            }
+                            else
+                                works.Add(id, work);
                         }
                     }
                     if(p%100==0)
