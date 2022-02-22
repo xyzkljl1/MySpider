@@ -148,7 +148,8 @@ namespace asmr.one
                             catch (Exception ex)
                             {
                                 Console.WriteLine("ReCreate IDM Instance Fail，Abort Download Try:" + ex.Message);
-                                return;
+                                Thread.Sleep(interval*10);
+                                continue;
                             }
                             int ct = Math.Min(tasks.Count / (download_interval / interval), 1);//根据剩余任务数量均摊，至少发送一个
                             for(int i=0; i < ct; i++)
@@ -164,7 +165,7 @@ namespace asmr.one
                                     Console.WriteLine("SendLinkToIDM Fail:" + ex.Message);
                                     Console.WriteLine("Discard IDM Instance,Abort Downloading Try");
                                     idm = null;
-                                    return;
+                                    break;
                                 }
                             }
                         }
