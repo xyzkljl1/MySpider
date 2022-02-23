@@ -151,7 +151,7 @@ namespace asmr.one
                                 Thread.Sleep(interval*10);
                                 continue;
                             }
-                            int ct = Math.Min(tasks.Count / (download_interval / interval), 1);//根据剩余任务数量均摊，至少发送一个
+                            int ct = Math.Max(tasks.Count / (download_interval / interval), 1);//根据剩余任务数量均摊，至少发送一个
                             for(int i=0; i < ct; i++)
                             {
                                 try
