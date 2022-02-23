@@ -35,7 +35,9 @@ namespace asmr.one
                 name = _n;
                 subdir = _d;
                 url = _u;
+                tmp_name = Guid.NewGuid().ToString();//下载用文件名
             }
+            public String tmp_name;
             public string name;
             public string subdir;//相对目录
             public string url;
@@ -185,14 +187,10 @@ namespace asmr.one
                 Console.WriteLine("Stop Sending IDM Task");
             }
         }
-        String FileNameCheck(String name,bool is_file=false)//检查单级目录/文件名是否合法
+        String FileNameCheck(String name)//检查单级目录/文件名是否合法
         {
             String ret = name;
             ret = Regex.Replace(ret, "[/\\\\?*<>:\"|]", "_");
-            //由于迷之原因，如果文件名包含"母"就会被替换成"ĸ",Chrome插件可以正确下载包含"母"的文件，怀疑是IDMLib的bug
-            //暂时替换所有"母"以绕过
-            if (is_file)
-                ret = Regex.Replace(ret, "母", "mu");
             /* 目录以空格结尾会导致windows和IDM的bug
              * 该目录无法正常删除(可通过压缩文件勾选删除源文件删除)，且打开无空格版本目录会导向该目录
              * 似乎以.结尾也会有问题
@@ -221,7 +219,7 @@ namespace asmr.one
                     bool done = true;
                     foreach (var file in work.files)
                     {
-                        var src_path = src_dir +"/"+ file.subdir + "/" + file.name;
+                        var src_path = src_dir +"/"+ file.subdir + "/" + file.tmp_name;
                         if (!File.Exists(src_path))
                             done = false;
                     }
@@ -234,7 +232,7 @@ namespace asmr.one
                             var dir = dest_dir + "/" + file.subdir;
                             if (!Directory.Exists(dir))
                                 Directory.CreateDirectory(dir);
-                            File.Copy(src_dir + "/" + file.subdir + "/" + file.name, dir + "/" + file.name,true);
+                            File.Copy(src_dir + "/" + file.subdir + "/" + file.tmp_name, dir + "/" + file.name,true);
                         }
                         Directory.Delete(src_dir, true);
                         foreach (var dir in work.alter_dir)
@@ -289,7 +287,10 @@ namespace asmr.one
                         work.status=Work.Status.Done;
                         continue;
                     }
-                    var tracks= (JArray)JsonConvert.DeserializeObject(await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id)));
+                    var tracks_str = await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id));
+                    if (tracks_str is null || tracks_str=="")
+                        continue;
+                    var tracks= (JArray)JsonConvert.DeserializeObject(tracks_str);
                     foreach (var track in tracks)
                         await ParseTracks(work, "", track.ToObject<JObject>());
                     //有的作品tracks为空，如RJ151237
@@ -304,8 +305,13 @@ namespace asmr.one
                         var dir = TmpDir + "/" + work.title + (file.subdir==""?"":"/" + file.subdir);
                         if (!Directory.Exists(dir))
                             Directory.CreateDirectory(dir);
+                        /*
+                         * 使用随机生成的文件名下载
+                         * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
+                         * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
+                        */
                         lock (tasks)
-                            tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.name });
+                            tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.tmp_name });
                     }
                     work.status = Work.Status.Downloading;
                     ct++;
@@ -394,7 +400,7 @@ namespace asmr.one
                 var url_download = json.Value<String>("mediaDownloadUrl");
                 //stream_url要加上token
                 var url_stream = json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
-                var title = FileNameCheck(json.Value<String>("title"),true);
+                var title = FileNameCheck(json.Value<String>("title"));
                 bool is_audio = IsAudio(title);
                 var ret_download = await CheckURL(url_download, is_audio);
                 var ret_stream = await CheckURL(url_stream, is_audio);
