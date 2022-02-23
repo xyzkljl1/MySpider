@@ -37,7 +37,7 @@ namespace asmr.one
                 url = _u;
                 tmp_name = Guid.NewGuid().ToString();//下载用文件名
                 if(name.Contains("."))//需要使用相同的后缀名以避免IDM弹窗
-                    tmp_name+= name.Split('.').Last();
+                    tmp_name+= "."+name.Split('.').Last();
             }
             public String tmp_name;
             public string name;
