@@ -120,7 +120,7 @@ namespace asmr.one
                     if (index % (24 * 7 * 2 * 1000*60*60/download_interval) == 0)//每2周
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
-                    await Download(25);
+                    await Download(35);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -334,6 +334,7 @@ namespace asmr.one
         }
         private async Task<RequestResult> CheckURL(string url,bool is_audio)
         {
+            //有时报告outofmemory异常，这里似乎有内存泄露？且只在请求失败时出现？Why？
             if (url == "" || url is null)
                 return RequestResult.Bad;
             try
@@ -342,10 +343,11 @@ namespace asmr.one
                     using (var response = await httpClient.SendAsync(request))
                         if (response.IsSuccessStatusCode)
                         {
-                            if (response.Content.Headers.Contains("Content-Length"))
+                            using(var content=response.Content)
+                            if (content.Headers.Contains("Content-Length"))
                             {
                                 //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
-                                var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
+                                var len = Int64.Parse(content.Headers.GetValues("Content-Length").First());
                                 if (len == 0)//字符串
                                     return RequestResult.Skip;
                                 else if (is_audio && len < 1024 * 200)
