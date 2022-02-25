@@ -49,7 +49,6 @@ namespace asmr.one
         public String RJ = "";
         public String title = "";
         public List<String> alter_dir = new List<string>();//由于一些坑爹的原因，可能会有多个
-        //subdir->url
         public List<File_> files= new List<File_>();
         public int fail_ct=0;
     }
@@ -209,14 +208,17 @@ namespace asmr.one
                 {
                     var id = work_pair.Key;
                     var work = work_pair.Value;
-                    var dest_dir = "";
+                    var dest_dir = "";                    
+                    var mid_dir ="";
                     {
                         String parent_dir = work.r ? RootDirR : RootDir;
                         foreach (var d in Directory.GetFileSystemEntries(parent_dir, work.RJ + "*"))//如果已经存在则用存在的，否则创建一个
                             dest_dir = d;
                         if (dest_dir == "")
                             dest_dir = parent_dir + "/" + work.title;//title包含了RJ号
+                        mid_dir = parent_dir + "/Tmp";
                     }
+
                     var src_dir = TmpDir + "/" + work.title;
                     bool done = true;
                     foreach (var file in work.files)
@@ -229,14 +231,23 @@ namespace asmr.one
                     {
                         Thread.Sleep(3000);//略微等待，防止文件正在写入
                         //Directory没有copy，Move不能跨卷移动
+                        //先拷贝到同卷的中转目录，防止中途失败导致文件不全
+                        if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
+                            Directory.Delete(mid_dir, true);
+                        Directory.CreateDirectory(mid_dir);
                         foreach (var file in work.files)
                         {
-                            var dir = dest_dir + "/" + file.subdir;
+                            var dir = mid_dir + "/" + file.subdir;
                             if (!Directory.Exists(dir))
                                 Directory.CreateDirectory(dir);
                             File.Copy(src_dir + "/" + file.subdir + "/" + file.tmp_name, dir + "/" + file.name,true);
                         }
+                        //清空目的目录防止带有多余的文件
+                        if (Directory.Exists(dest_dir))
+                            Directory.Delete(dest_dir, true);
+                        Directory.Move(mid_dir,dest_dir);
                         Directory.Delete(src_dir, true);
+                        //清空替换目录
                         foreach (var dir in work.alter_dir)
                         {
                             Directory.Delete(dir, true);
@@ -261,8 +272,8 @@ namespace asmr.one
                     }
                 }
             Console.Write(String.Format("Downloading Check {0} ", downloading_works.Count));
-            foreach (var work in downloading_works)
-                Console.Write(work+" ");
+            //foreach (var work in downloading_works)
+                //Console.Write(work+" ");
             Console.WriteLine();
         }
         private async Task Download(int limit)
@@ -292,13 +303,12 @@ namespace asmr.one
                     var tracks_str = await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id));
                     if (tracks_str is null || tracks_str=="")
                         continue;
-                    var tracks= (JArray)JsonConvert.DeserializeObject(tracks_str);
-                    foreach (var track in tracks)
-                        await ParseTracks(work, "", track.ToObject<JObject>());
-                    //有的作品tracks为空，如RJ151237
-                    //此时标记为Done以跳过
-                    if(work.files.Count==0)
+                    bool get_track_success = true;
+                    foreach (var track in (JArray)JsonConvert.DeserializeObject(tracks_str))
+                        get_track_success&=await ParseTracks(work, "", track.ToObject<JObject>());
+                    if (work.files.Count == 0||!get_track_success)//未能正常获取所有文件的跳过
                     {
+                        Console.WriteLine("Can't Get Track"+work.RJ);
                         work.status = Work.Status.Done;
                         continue;
                     }
@@ -348,8 +358,8 @@ namespace asmr.one
                             {
                                 //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
                                 var len = Int64.Parse(content.Headers.GetValues("Content-Length").First());
-                                if (len == 0)//字符串
-                                    return RequestResult.Skip;
+                                if (len == 0)
+                                    return RequestResult.Bad;
                                 else if (is_audio && len < 1024 * 200)
                                     return RequestResult.Skip;
                                 else
@@ -375,16 +385,17 @@ namespace asmr.one
                     return true;
             return false;
         }
-        private async Task ParseTracks(Work work,String parent,JObject json)
+        private async Task<bool> ParseTracks(Work work,String parent,JObject json)
         {
             if (json == null)
-                return;
+                return false;
             if (!json.ContainsKey("type"))
-                return;
+                return false;
             if (!json.ContainsKey("title"))
-                return;
+                return false;
             if (json.Value<String>("type")=="folder")
             {
+                bool ret = true;
                 //由于谜之原因，目录里会有非法字符，如RJ047447
                 //部分作品自带乱码，如RJ066580
                 //可能有多于1级目录，此时拆开分别检查
@@ -397,7 +408,8 @@ namespace asmr.one
                 }
                 if (json.ContainsKey("children"))
                     foreach (var item in json.Value<JArray>("children"))
-                        await ParseTracks(work, dir, item.ToObject<JObject>());
+                        ret&=await ParseTracks(work, dir, item.ToObject<JObject>());
+                return ret;
             }
             else if (json.ContainsKey("mediaDownloadUrl")|| json.ContainsKey("mediaStreamUrl"))
             {
@@ -411,24 +423,21 @@ namespace asmr.one
                 String url = null;
                 //个别文件的downloadurl无效，而streamurl有效，如RJ061291
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
-                //请求失败可能是短暂的网络错误，出现Bad时仍然下载
+                //请求失败可能是短暂的网络错误，此时也视作无效
                 if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download总是优先于url_stream
                     url = url_download;
                 else if (ret_stream == RequestResult.Good)
                     url = url_stream;
-                else if (ret_download == RequestResult.Skip && ret_stream == RequestResult.Skip)//两个都为zero则不下载
+                else if (ret_download == RequestResult.Skip || ret_stream == RequestResult.Skip)//一个为skip一个为bad/skip则不下载
                     url = null;
-                else if (ret_download == RequestResult.Skip)//一个为Zero一个为Bad则选择Bad
-                    url = url_stream;
-                else if (ret_stream == RequestResult.Skip)
-                    url = url_download;
-                else//都为Bad则选择第一个
-                    url = url_download;
-                //DLSite上的文件名不含非法字符，但是asmr.one上的文件名替换了一些字符，例如RJ018866将AM０７：２３.mp3替换成了AM０７:２３.mp3从而出现了非法字符
+                else//都为bad则失败
+                    return false;
                 //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
                     work.files.Add(new Work.File_(title, parent, url));
+                return true;
             }
+            return false;
         }
         private Dictionary<int,List<String>> GetAlterWorks()
         {
