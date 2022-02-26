@@ -344,20 +344,24 @@ namespace asmr.one
         }
         private async Task<RequestResult> CheckURL(string url,bool is_audio)
         {
-            //有时报告outofmemory异常，这里似乎有内存泄露？且只在请求失败时出现？Why？
+            //DLSite的文件是分段压缩的，此处不是，所以有单个文件会超过2G
             if (url == "" || url is null)
                 return RequestResult.Bad;
             try
             {
+                /*
+                 如果不指定HttpCompletionOption.ResponseHeadersRead，即使是Head请求也会分配缓冲区(但是不会下载)
+                 分配的缓冲区占用内存在任务管理器中显示为"提交"，在VS调试工具中显示为"专用"
+                 这些内存不会随着response析构/httpclient.Dispose/GC.Collect而释放，Why??
+                */
                 using (var request = new HttpRequestMessage(HttpMethod.Head, url))
-                    using (var response = await httpClient.SendAsync(request))
+                    using (var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead))
                         if (response.IsSuccessStatusCode)
                         {
-                            using(var content=response.Content)
-                            if (content.Headers.Contains("Content-Length"))
+                            if (response.Content.Headers.Contains("Content-Length"))
                             {
                                 //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
-                                var len = Int64.Parse(content.Headers.GetValues("Content-Length").First());
+                                var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
                                 if (len == 0)
                                     return RequestResult.Bad;
                                 else if (is_audio && len < 1024 * 200)
