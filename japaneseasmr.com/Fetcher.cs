@@ -183,6 +183,8 @@ namespace japaneseasmr.com
                     {
                         var name = url.Substring(url.LastIndexOf("=") + 1);//文件名
                         var outter_page = await RequestRedirect(url);
+                        if (outter_page is null)
+                            continue;
                         if (work.outter_pages.ContainsKey(name))
                             work.outter_pages[name].Add(outter_page);
                         else

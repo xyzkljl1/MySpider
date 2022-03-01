@@ -59,8 +59,8 @@ namespace asmr.one
             Skip,
             Bad
         };
-        private String RootDir = "G:/ASMR_Reliable";
-        private String RootDirR = "G:/ASMR_ReliableR";
+        private String RootDir = "J:/ASMR_Reliable";
+        private String RootDirR = "J:/ASMR_ReliableR";
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "G:/ASMR_Unreliable", "G:/ASMR_UnreliableR" };
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
@@ -83,7 +83,7 @@ namespace asmr.one
                     MaxConnectionsPerServer = 256,
                     UseCookies = true,
                     CookieContainer = cookies_container,
-                    Proxy = new WebProxy("127.0.0.1:1196", false)
+                    Proxy = new WebProxy("127.0.0.1:8000", false)
                 };
                 handler.ServerCertificateCustomValidationCallback = delegate { return true; };
                 httpClient = new HttpClient(handler);
@@ -119,7 +119,7 @@ namespace asmr.one
                     if (index % (24 * 7 * 2 * 1000*60*60/download_interval) == 0)//每2周
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
-                    await Download(35);
+                    await Download(45);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
