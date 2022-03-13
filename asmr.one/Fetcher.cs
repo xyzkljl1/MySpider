@@ -59,8 +59,8 @@ namespace asmr.one
             Skip,
             Bad
         };
-        private String RootDir = "J:/ASMR_Reliable";
-        private String RootDirR = "J:/ASMR_ReliableR";
+        private String RootDir = "H:/ASMR_Reliable";
+        private String RootDirR = "H:/ASMR_ReliableR";
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "G:/ASMR_Unreliable", "G:/ASMR_UnreliableR" };
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
@@ -161,7 +161,7 @@ namespace asmr.one
                                 {
                                     var task = tasks.Dequeue();                        
                                     //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
-                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, 0x01 /*| 0x02*/);
+                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, 0x02 /*| 0x02*/);
                                 }
                                 catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
                                 {
@@ -229,34 +229,45 @@ namespace asmr.one
                     }
                     if (done)
                     {
-                        Thread.Sleep(3000);//略微等待，防止文件正在写入
-                        //Directory没有copy，Move不能跨卷移动
-                        //先拷贝到同卷的中转目录，防止中途失败导致文件不全
-                        if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
-                            Directory.Delete(mid_dir, true);
-                        Directory.CreateDirectory(mid_dir);
-                        foreach (var file in work.files)
+                        try
                         {
-                            var dir = mid_dir + "/" + file.subdir;
-                            if (!Directory.Exists(dir))
-                                Directory.CreateDirectory(dir);
-                            File.Copy(src_dir + "/" + file.subdir + "/" + file.tmp_name, dir + "/" + file.name,true);
+                            Thread.Sleep(3000);//略微等待，防止文件正在写入
+                                               //Directory没有copy，Move不能跨卷移动
+                                               //先拷贝到同卷的中转目录，防止中途失败导致文件不全
+                            if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
+                                Directory.Delete(mid_dir, true);
+                            Directory.CreateDirectory(mid_dir);
+                            foreach (var file in work.files)
+                            {
+                                var dir = mid_dir + "/" + file.subdir;
+                                if (!Directory.Exists(dir))
+                                    Directory.CreateDirectory(dir);
+                                File.Copy(src_dir + "/" + file.subdir + "/" + file.tmp_name, dir + "/" + file.name, true);
+                            }
+                            //清空目的目录防止带有多余的文件
+                            if (Directory.Exists(dest_dir))
+                                Directory.Delete(dest_dir, true);
+                            Directory.Move(mid_dir, dest_dir);
+                            Directory.Delete(src_dir, true);
+                            //清空替换目录
+                            foreach (var dir in work.alter_dir)
+                            {
+                                Directory.Delete(dir, true);
+                                Console.WriteLine("Remove {0}", dir);
+                            }
+                            work.status = Work.Status.Done;
+                            work.alter_dir.Clear();
+                            work.files.Clear();
+                            Console.WriteLine(String.Format("Download {0} Done", work.RJ));
                         }
-                        //清空目的目录防止带有多余的文件
-                        if (Directory.Exists(dest_dir))
-                            Directory.Delete(dest_dir, true);
-                        Directory.Move(mid_dir,dest_dir);
-                        Directory.Delete(src_dir, true);
-                        //清空替换目录
-                        foreach (var dir in work.alter_dir)
+                        catch (Exception ex)
                         {
-                            Directory.Delete(dir, true);
-                            Console.WriteLine("Remove {0}", dir);
+                            //视作失败重来
+                            Console.WriteLine("Can't Rename Finished Work " + id+":"+ex.Message);
+                            work.fail_ct = 0;
+                            work.status = Work.Status.Waiting;
+                            work.files.Clear();
                         }
-                        work.status = Work.Status.Done;
-                        work.alter_dir.Clear();
-                        work.files.Clear();
-                        Console.WriteLine(String.Format("Download {0} Done", work.RJ));
                     }
                     else
                     {
