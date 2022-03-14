@@ -71,7 +71,7 @@ namespace asmr.one
         private DateTime LastFetchTime =DateTime.MinValue;
         String bearer_token="";
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
-        private List<String> suffixs=new List<string> { ".mp3",".wav",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa" };
+        private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private int test_id= -1;
@@ -161,7 +161,7 @@ namespace asmr.one
                                 {
                                     var task = tasks.Dequeue();                        
                                     //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
-                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, 0x02 /*| 0x02*/);
+                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, 0x01 /*| 0x02*/);
                                 }
                                 catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
                                 {
@@ -445,7 +445,7 @@ namespace asmr.one
                     url = url_stream;
                 else if (ret_download == RequestResult.Skip || ret_stream == RequestResult.Skip)//一个为skip一个为bad/skip则不下载
                     url = null;
-                else//都为bad则失败
+                else if(is_audio)//音频文件都为bad则失败，否则跳过不下载
                     return false;
                 //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
