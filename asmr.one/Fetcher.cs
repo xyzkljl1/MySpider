@@ -173,7 +173,7 @@ namespace asmr.one
                             }
                         }
                         send_ct++;
-                        if (send_ct * interval > 1000 * 15 * 60)
+                        if (send_ct * interval > 1000 * 60 * 60)
                         {
                             Console.WriteLine("Left IDM Task:"+tasks.Count);
                             send_ct = 0;
