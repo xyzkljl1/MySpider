@@ -83,7 +83,7 @@ namespace asmr.one
                     MaxConnectionsPerServer = 256,
                     UseCookies = true,
                     CookieContainer = cookies_container,
-                    Proxy = new WebProxy("127.0.0.1:8000", false)
+                    Proxy = new WebProxy("127.0.0.1:1196", false)
                 };
                 handler.ServerCertificateCustomValidationCallback = delegate { return true; };
                 httpClient = new HttpClient(handler);
@@ -91,10 +91,19 @@ namespace asmr.one
                 httpClient.DefaultRequestHeaders.Referrer = new Uri("https://www.asmr.one");
                 httpClient.DefaultRequestHeaders.AcceptEncoding.ParseAdd("none");
                 httpClient.DefaultRequestHeaders.Add("origin", "https://www.asmr.one");
-
+                //出现了人机验证问题，同时浏览器可以正常访问，在使用edge登录/加上sec字段/更新user-agent/经过一段时间后不再需要人机验证，why？
+                /*
+                httpClient.DefaultRequestHeaders.Referrer=new Uri("https://www.asmr.one/");
+                httpClient.DefaultRequestHeaders.Add("sec-ch-ua", "\" Not A; Brand\";v=\"99\", \"Chromium\";v=\"99\", \"Microsoft Edge\";v=\"99\"");
+                httpClient.DefaultRequestHeaders.Add("sec-ch-ua-mobile", "?0");
+                httpClient.DefaultRequestHeaders.Add("sec-ch-ua-platform", "\"Windows\"");
+                httpClient.DefaultRequestHeaders.Add("sec-fetch-dest", "emoty");
+                httpClient.DefaultRequestHeaders.Add("sec-fetch-mode", "cors");
+                httpClient.DefaultRequestHeaders.Add("sec-fetch-site", "same-site");
+*/
                 httpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
                 httpClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
-                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.82 Safari/537.36");
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.74 Safari/537.36 Edg/99.0.1150.55");
             }
         }
         public async Task Start()
@@ -532,8 +541,7 @@ namespace asmr.one
         public async Task<bool> Login()
         {
             JObject jdoc = null;
-            using (var content=new StringContent("{\"name\": \"guest\", \"password\": \"guest\"}", Encoding.UTF8, "application/json"))
-                jdoc = await PostJson("https://api.asmr.one/api/auth/me", content);
+            jdoc = await PostJson("https://api.asmr.one/api/auth/me", "{\"name\": \"guest\", \"password\": \"guest\"}", Encoding.UTF8, "application/json");
             if(jdoc != null)
                 if (jdoc.ContainsKey("token"))
                 {
@@ -559,9 +567,9 @@ namespace asmr.one
                 return (JObject)JsonConvert.DeserializeObject(result);
             return null;
         }
-        private async Task<JObject> PostJson(String addr, HttpContent data)
+        private async Task<JObject> PostJson(String addr, String data,Encoding encoding,String type)
         {
-            var result = await Post(addr,data);
+            var result = await Post(addr,data,encoding,type);
             if (result != null)
                 return (JObject)JsonConvert.DeserializeObject(result);
             return null;
@@ -589,17 +597,21 @@ namespace asmr.one
                 }
             return null;
         }
-        private async Task<String> Post(String addr,HttpContent data)
+        private async Task<String> Post(String addr,String data, Encoding encoding, String type)
         {
             for (int i = 12; i > 0; --i)
                 try
                 {
-                    using (HttpResponseMessage response = await httpClient.PostAsync(addr, data))
-                    {
-                        if (!response.IsSuccessStatusCode)
-                            throw new Exception("HTTP Not Success");
-                        return await response.Content.ReadAsStringAsync();
-                    }
+                    using (var content = new StringContent(data, encoding, type))
+                        using (HttpResponseMessage response = await httpClient.PostAsync(addr, content))
+                        {
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                var x = await response.Content.ReadAsStringAsync();
+                                throw new Exception("HTTP Not Success");
+                            }
+                            return await response.Content.ReadAsStringAsync();
+                        }
                 }
                 catch (Exception e)
                 {
