@@ -47,14 +47,14 @@ namespace japaneseasmr.com
                     MaxConnectionsPerServer = 256,
                     UseCookies = true,
                     CookieContainer = cookies_container,
-                    Proxy = new WebProxy("127.0.0.1:1196", false)
+                    Proxy = new WebProxy("127.0.0.1:8000", false)
                 };
                 handler.ServerCertificateCustomValidationCallback = delegate { return true; };
                 httpClient = new HttpClient(handler);
                 httpClient.Timeout = new TimeSpan(0, 0, 35);
                 httpClient.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3");
                 httpClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
-                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36");
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36");
             }
             {
                 var handler = new HttpClientHandler()
@@ -63,14 +63,14 @@ namespace japaneseasmr.com
                     UseCookies = true,
                     AllowAutoRedirect=false,
                     CookieContainer = cookies_container,
-                    Proxy = new WebProxy("127.0.0.1:1196", false)
+                    Proxy = new WebProxy("127.0.0.1:8000", false)
                 };
                 handler.ServerCertificateCustomValidationCallback = delegate { return true; };
                 httpClient_redirect = new HttpClient(handler);
                 httpClient_redirect.Timeout = new TimeSpan(0, 0, 35);
                 httpClient_redirect.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3");
                 httpClient_redirect.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
-                httpClient_redirect.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36");
+                httpClient_redirect.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36");
             }
         }
         public async Task Start()
@@ -325,7 +325,7 @@ namespace japaneseasmr.com
                 {
                     using (HttpResponseMessage response = await httpClient.GetAsync(addr))
                     {
-                        if (!response.IsSuccessStatusCode)
+                         if (!response.IsSuccessStatusCode)
                             throw new Exception("HTTP Not Success");
                         return await response.Content.ReadAsStringAsync();
                     }
@@ -404,34 +404,84 @@ namespace japaneseasmr.com
                     return new KeyValuePair<String, String>("","");
                 }
             }
-            var btn_node = doc.DocumentNode.SelectSingleNode("//a[@id='dlbutton']");
-            if (btn_node is null)
-                return new KeyValuePair<string, string>("", "");
-            var parent_node = btn_node.ParentNode;
-            var script = parent_node.SelectSingleNode("script").InnerText;
-            //提取脚本中的定义和赋值
-            /*
-            var n = 616401%2;
-            var b = 616401%3;
-            var z = 616404;
-            document.getElementById('dlbutton').href = "/d/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
-            if (document.getElementById('fimage')) {
-            document.getElementById('fimage').href = "/i/DhfQti7M/"+(n + b + z - 3)+"/RJ362225.mp3";
+            try
+            {
+
+                var btn_node = doc.DocumentNode.SelectSingleNode("//a[@id='dlbutton']");
+                if (btn_node is null)
+                    return new KeyValuePair<string, string>("", "");
+                var parent_node = btn_node.ParentNode;
+                var script = parent_node.SelectSingleNode("script").InnerText;
+                //提取脚本中的定义和赋值
+                /* 
+                var a = function() {return 1};
+                var b = function() {return a() + 1};
+                var c = function() {return b() + 1};
+                var d = document.getElementById('omg').getAttribute('class');
+                if (true) { d = d*2;}
+                document.getElementById('dlbutton').href = "/d/DEEdOWo2/"+(255981%1000 + a() + b() + c() + d + 5/5)+"/RJ404647.mp3";
+                if (document.getElementById('fimage')) {
+                    document.getElementById('fimage').href = "/i/DEEdOWo2/"+(255981%1000 + a() + b() + c() + d + 5/5)+"/RJ404647.mp3";
+                */
+                var express = script;
+                express += Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);").Groups[1].Value;
+                var rnd=new Random();
+                var object_name_dict = new Dictionary<Object, String>();
+                var attr_name_dict = new Dictionary<String, String>();
+                //替换document.getElementById('x')->x
+                foreach (Match ele in Regex.Matches(script, "document.getElementById\\('([^'\"\\n]+)'\\)"))//在初始文本中搜索
+                {
+                    if (express.IndexOf(ele.ToString()) > 0)
+                    {
+                        var name = ele.Groups[1].Value;
+                        var node = doc.GetElementbyId(name);
+                        if(node is null)
+                            express = express.Replace(ele.ToString(), "null");//不存在的都换成null
+                        else
+                        {
+                            if (!object_name_dict.ContainsKey(node))
+                                object_name_dict.Add(node, "v" + rnd.Next().ToString() + "_" + rnd.Next().ToString());
+                            var def_expr = String.Format("var {0}={{", object_name_dict[node]);
+                            foreach (var attr in node.GetAttributes())//新建一个变量，包含其所有属性
+                            {
+                                if (!attr_name_dict.ContainsKey(attr.Name))
+                                    attr_name_dict.Add(attr.Name, "a" + rnd.Next().ToString() + "_" + rnd.Next().ToString());
+                                def_expr += String.Format("{0}:'{1}',", attr_name_dict[attr.Name], attr.Value);
+                            }
+                            if (def_expr.EndsWith(","))
+                                def_expr = def_expr.Substring(0, def_expr.Length - 1);
+                            def_expr += "};";
+                            express = def_expr + express;//在最前面加上定义语句
+                            express = express.Replace(ele.ToString(), object_name_dict[node]);//替换所有调用
+                        }
+                    }
+                }
+                //替换x.getAttribute('y')->x.y
+                foreach (Match ele in Regex.Matches(express, "getAttribute\\('([a-zA-Z0-9 _-]+)'\\)"))//在express中搜索
+                {
+                    Console.WriteLine(ele.ToString());
+                    var name = ele.Groups[1].Value;
+                    if (attr_name_dict.ContainsKey(name))
+                        express = express.Replace(ele.ToString(), attr_name_dict[name]);
+                }
+
+                //foreach (var m in Regex.Matches(script, "var.*?[a-z0-9_]+.*?=.*?;"))
+                //express += m.ToString();
+                ScriptControl scriptControl = new MSScriptControl.ScriptControl();
+                scriptControl.UseSafeSubset = true;
+                scriptControl.Language = "JScript";
+                string path = scriptControl.Eval(express).ToString();
+                var real_url = Regex.Match(_url, "https://.*?/").ToString() + path.Substring(1);
+                var cookies = "";
+                foreach (var cookie in cookies_container.GetCookies(new Uri(real_url)).Cast<Cookie>())
+                    cookies += cookie.Name + "=" + cookie.Value + "; ";
+                return new KeyValuePair<String, String>(real_url, cookies);
             }
-             */
-            var express = "";
-            foreach (var m in Regex.Matches(script, "var.*?[a-z0-9_]+.*?=.*?;"))
-                express += m.ToString();
-            express += Regex.Match(script, "document.getElementById\\('dlbutton'\\).href.*?=(.*?);").Groups[1].Value;
-            ScriptControl scriptControl = new MSScriptControl.ScriptControl();
-            scriptControl.UseSafeSubset = true;
-            scriptControl.Language = "JScript";
-            string path = scriptControl.Eval(express).ToString();
-            var real_url=Regex.Match(_url, "https://.*?/").ToString()+path.Substring(1);
-            var cookies = "";
-            foreach (var cookie in cookies_container.GetCookies(new Uri(real_url)).Cast<Cookie>())
-                cookies += cookie.Name + "=" + cookie.Value + "; ";
-            return new KeyValuePair<String, String> ( real_url, cookies );
+            catch (Exception ex)
+            {
+                Console.WriteLine("Zippyshare Script Failure:"+ex.Message);
+                throw (ex);
+            }
         }
         private async Task<KeyValuePair<String, String>> GetRealURLFromAnofiles(String _url)
         {
