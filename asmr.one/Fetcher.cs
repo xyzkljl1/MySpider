@@ -15,6 +15,7 @@ using System.Threading;
 
 namespace asmr.one
 {
+    using FuncStringPair = System.Collections.Generic.KeyValuePair<Func<Work, bool>, String>;
     public struct IDMTask
     {
         public string name;
@@ -48,19 +49,25 @@ namespace asmr.one
         public bool r=false;
         public String RJ = "";
         public String title = "";
+        public int group=0;//社团(maker/group/circle)的id
         public List<String> alter_dir = new List<string>();//由于一些坑爹的原因，可能会有多个
         public List<File_> files= new List<File_>();
         public int fail_ct=0;
     }
     class Fetcher
     {
-        private enum RequestResult{
+        private enum RequestResult {
             Good,
             Skip,
             Bad
         };
-        private String RootDir = "I:/ASMR_Reliable";
-        private String RootDirR = "I:/ASMR_ReliableR";
+        //依序检查是否符合条件，符合条件则下载到对应目录
+        private List<FuncStringPair> RootDirs =new List<FuncStringPair> { 
+                                            new FuncStringPair(IsChinese, "I:/ASMR_Chinese"),
+                                            new FuncStringPair(IsR, "I:/ASMR_ReliableR"),
+                                            new FuncStringPair(ReturnTrue, "I:/ASMR_Reliable") };
+        //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
+        static private List<int> ChineseGroupId = new List<int> { 48509,37402,46806,39804, 57900 };
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "G:/ASMR_Unreliable", "G:/ASMR_UnreliableR" };
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
@@ -141,6 +148,18 @@ namespace asmr.one
                 Console.WriteLine("Exception:" + ex.Message);
                 Console.WriteLine(ex.StackTrace);
             }
+        }
+        private static bool IsChinese(Work work)
+        {
+            return ChineseGroupId.Contains(work.group);
+        }
+        private static bool IsR(Work work)
+        {
+            return work.r;
+        }
+        private static bool ReturnTrue(Work w)
+        {
+            return true;
         }
         public void SendingIDMTask()
         {
@@ -223,7 +242,15 @@ namespace asmr.one
                     var dest_dir = "";                    
                     var mid_dir ="";
                     {
-                        String parent_dir = work.r ? RootDirR : RootDir;
+                        String parent_dir = null;
+                        foreach (var pair in RootDirs)//依次根据条件决定下载到哪个目录
+                            if (pair.Key(work))
+                            {
+                                parent_dir = pair.Value;
+                                break;
+                            }
+                        if (parent_dir is null)
+                            throw (new Exception("Fatal,Invalid RootDir"));
                         foreach (var d in Directory.GetFileSystemEntries(parent_dir, work.RJ + "*"))//如果已经存在则用存在的，否则创建一个
                             dest_dir = d;
                         if (dest_dir == "")
@@ -318,6 +345,8 @@ namespace asmr.one
                     }
                     else if (!eliminated.Contains(id))
                         need_download = true;
+                    else if(test_id==id)//测试模式
+                        need_download=true;
                     if (!need_download)
                     {
                         work.status=Work.Status.Done;
@@ -519,9 +548,10 @@ namespace asmr.one
                             work.r = work_object.Value<Boolean>("nsfw");
                             //id即是RJ号，前面补0；使用该网站给出的title，title可能为空如RJ087362
                             work.RJ = String.Format("RJ{0:D6}", id);
+                            work.group = work_object.Value<int>("circle_id");
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
                             work.title = FileNameCheck(work.title);
-                            if(test_id>0)
+                            if(test_id>0)//测试模式,只下载特定作品
                             {
                                 if(id==test_id)
                                 {
