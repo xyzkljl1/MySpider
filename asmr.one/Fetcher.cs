@@ -63,7 +63,7 @@ namespace asmr.one
         };
         //依序检查是否符合条件，符合条件则下载到对应目录
         private List<FuncStringPair> RootDirs =new List<FuncStringPair> { 
-                                            new FuncStringPair(IsChinese, "I:/ASMR_Chinese"),
+                                            new FuncStringPair(IsChinese, "G:/ASMR_Chinese"),
                                             new FuncStringPair(IsR, "I:/ASMR_ReliableR"),
                                             new FuncStringPair(ReturnTrue, "I:/ASMR_Reliable") };
         //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
@@ -111,7 +111,7 @@ namespace asmr.one
 */
                 httpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
                 httpClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh;q=0.9,ja;q=0.8");
-                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.74 Safari/537.36 Edg/99.0.1150.55");
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36");
             }
         }
         public async Task Start()
@@ -123,6 +123,9 @@ namespace asmr.one
                 if (Directory.Exists(TmpDir))
                     Directory.Delete(TmpDir, true);
                 Directory.CreateDirectory(TmpDir);
+                foreach(var pair in RootDirs)
+                    if (!Directory.Exists(pair.Value))
+                        Directory.CreateDirectory(pair.Value);
                 if (!await Login())
                 {
                     Console.WriteLine("Login Fail,Exiting...");
