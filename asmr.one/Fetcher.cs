@@ -59,8 +59,8 @@ namespace asmr.one
             Skip,
             Bad
         };
-        private String RootDir = "H:/ASMR_Reliable";
-        private String RootDirR = "H:/ASMR_ReliableR";
+        private String RootDir = "I:/ASMR_Reliable";
+        private String RootDirR = "I:/ASMR_ReliableR";
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "G:/ASMR_Unreliable", "G:/ASMR_UnreliableR" };
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
@@ -526,6 +526,7 @@ namespace asmr.one
                                 if(id==test_id)
                                 {
                                     works.Add(id, work);
+                                    Console.WriteLine("Page:{0}",p);
                                     return;
                                 }
                             }
