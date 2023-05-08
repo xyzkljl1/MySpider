@@ -63,13 +63,13 @@ namespace asmr.one
         };
         //依序检查是否符合条件，符合条件则下载到对应目录
         private List<FuncStringPair> RootDirs =new List<FuncStringPair> { 
-                                            new FuncStringPair(IsChinese, "G:/ASMR_Chinese"),
-                                            new FuncStringPair(IsR, "I:/ASMR_ReliableR"),
-                                            new FuncStringPair(ReturnTrue, "I:/ASMR_Reliable") };
+                                            new FuncStringPair(IsChinese, "Z:/ASMR_Chinese"),
+                                            new FuncStringPair(IsR, "Z:/ASMR_ReliableR"),
+                                            new FuncStringPair(ReturnTrue, "Z:/ASMR_Reliable") };
         //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
-        static private List<int> ChineseGroupId = new List<int> { 48509,37402,46806,39804, 57900 };
+        static private List<int> ChineseGroupId = new List<int> { 48509,37402,46806,39804, 57900, 64486, 64435 , 74042 };
         //如果某作品处于以下目录，则删除它们并强制重新下载
-        private List<String> AlterDirs = new List<string>{ "G:/ASMR_Unreliable", "G:/ASMR_UnreliableR" };
+        private List<String> AlterDirs = new List<string>{ "Z:/ASMR_Unreliable", "Z:/ASMR_UnreliableR" };
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
         public String query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
@@ -166,7 +166,7 @@ namespace asmr.one
         }
         public void SendingIDMTask()
         {
-            int interval = 30000;//每隔30s发送一次
+            int interval = 60*1000*5;//每隔300s发送一次
             int send_ct = 0;
             try
             {
@@ -506,13 +506,17 @@ namespace asmr.one
         private Dictionary<int,List<String>> GetAlterWorks()
         {
             var ret=new Dictionary<int, List<String>>();
+            var regex = new Regex("[RVBJ]{2}([0-9]{3,8})");
             foreach (var parent_dir in AlterDirs)
             {
                 var di=new DirectoryInfo(parent_dir);
                 foreach (DirectoryInfo NextFolder in di.GetDirectories())
                 {
                     int id = 0;
-                    if(!Int32.TryParse(NextFolder.Name.Substring(2, 6),out id))//第3~8个字符是RJ号的数字部分
+                    var matches = regex.Matches(NextFolder.Name);
+                    if (matches.Count > 0)
+                        id = Int32.Parse(matches[0].Groups[1].Value);
+                    else
                         continue;
                     if(ret.ContainsKey(id))
                         ret[id].Append(NextFolder.FullName);
@@ -549,7 +553,7 @@ namespace asmr.one
                         {
                             var work = new Work();
                             work.r = work_object.Value<Boolean>("nsfw");
-                            //id即是RJ号，前面补0；使用该网站给出的title，title可能为空如RJ087362
+                            //id即是RJ号，不足6位的补0，多于6位的不变；使用该网站给出的title，title可能为空如RJ087362
                             work.RJ = String.Format("RJ{0:D6}", id);
                             work.group = work_object.Value<int>("circle_id");
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));

@@ -26,8 +26,8 @@ namespace japaneseasmr.com
     }
     class Fetcher
     {
-        private String RootDir = "G:/ASMR_Unreliable";
-        private String RootDirR = "G:/ASMR_UnreliableR";
+        private String RootDir = "Z:/ASMR_Unreliable";
+        private String RootDirR = "Z:/ASMR_UnreliableR";
         private String TmpDir = "E:/Tmp/MySpider/JASMR";
         public String query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
@@ -87,6 +87,8 @@ namespace japaneseasmr.com
                     await FetchSearchPage();
                     Console.WriteLine(String.Format("Fetch Search Page {0} => {1}",tmp,works.Count));
                 }
+                //works.Add("RJ010329", new Work());
+                //works["RJ010329"].work_pages.Add("https://japaneseasmr.com/75644/");
                 await Download(25);
                 CheckDownload();
                 Thread.Sleep(1000 *60*60);//每小时一次
@@ -211,9 +213,12 @@ namespace japaneseasmr.com
                             var cookie = "";
                             if (Regex.IsMatch(page, "https://www.*.zippyshare.com/.*"))
                             {
-                                var ret = await GetRealURLFromZippyshare(page);
-                                url = ret.Key;
-                                cookie = ret.Value;
+                                //Fuck zippyshare
+                                //垃圾网站变动过于频繁，懒得处理，忽略
+                                Console.WriteLine("Ignore ZippyShare");
+                                //var ret = await GetRealURLFromZippyshare(page);
+                                //url = ret.Key;
+                                //cookie = ret.Value;
                             }
                             else if (Regex.IsMatch(page, "https://anonfiles.com/.*"))
                             {
@@ -222,7 +227,7 @@ namespace japaneseasmr.com
                                 cookie = ret.Value;
                             }
                             else
-                                Console.WriteLine("Unknown Outter Site");
+                                Console.WriteLine("Unknown Outter Site:"+page);
                             if (url == "")
                                 continue;
                             if (url.EndsWith("html"))
@@ -269,7 +274,7 @@ namespace japaneseasmr.com
                 try
                 {
                     var doc = await RequestHtml(String.Format("https://japaneseasmr.com/page/{0}/?orderby=date&order=dsc", pi));
-                    var regex = new Regex("[RVBJ]{2}[0-9]{3,6}");
+                    var regex = new Regex("[RVBJ]{2}[0-9]{3,8}");
                     if (doc != null)
                         foreach (var node in doc.DocumentNode.SelectNodes("//div[@class='entry-preview-wrapper clearfix']"))
                         {
@@ -314,6 +319,11 @@ namespace japaneseasmr.com
         {
             var ret = new HashSet<String>();
             var response=await RequestPage(query_addr);
+            if(response==null)
+            {
+                Console.Error.WriteLine("Can't Get EliminatedWorks.");
+                throw new Exception("Can't Get EliminatedWorks.");
+            }
             foreach (var id in response.Split(' '))
                 ret.Add(id);
             return ret;
