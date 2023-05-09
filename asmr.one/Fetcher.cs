@@ -133,14 +133,14 @@ namespace asmr.one
                     return;
                 }
                 //将IDM任务分散发送以避免拥堵
-                Task.Run(() => SendingIDMTask());
+                _ = Task.Run(() => SendingIDMTask());
                 while (true)
                 {
                     if (index % (24 * 7 * 2 * 1000*60*60/download_interval) == 0)//每2周
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
                     //429的文件会在一定时间内持续429，更换代理可能解除，经过一段时间可能解除
-                    await Download(25);
+                    await Download(25,70);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -329,12 +329,13 @@ namespace asmr.one
                 //Console.Write(work+" ");
             Console.WriteLine();
         }
-        private async Task Download(int limit)
+        private async Task Download(int limit,int max_concurrency)
         {
             var eliminated = await GetEliminatedWorks();
             var alter =GetAlterWorks();
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
             int ct = 0;
+            int waiting_ct = works.Count(ele => ele.Value.status == Work.Status.Downloading);
             foreach (var pair in works)
                 if(pair.Value.status == Work.Status.Waiting)
                 {
@@ -388,6 +389,8 @@ namespace asmr.one
                     work.status = Work.Status.Downloading;
                     ct++;
                     if (ct >= limit)
+                        break;
+                    if (ct+waiting_ct >= max_concurrency)
                         break;
                 }
             {
