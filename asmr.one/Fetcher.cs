@@ -140,7 +140,7 @@ namespace asmr.one
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
                     //429的文件会在一定时间内持续429，更换代理可能解除，经过一段时间可能解除
-                    await Download(25,70);
+                    await Download(25,60);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -273,7 +273,7 @@ namespace asmr.one
                     {
                         try
                         {
-                            Thread.Sleep(3000);//略微等待，防止文件正在写入
+                            Thread.Sleep(5000);//略微等待，防止文件正在写入
                                                //Directory没有copy，Move不能跨卷移动
                                                //先拷贝到同卷的中转目录，防止中途失败导致文件不全
                             if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
@@ -289,6 +289,7 @@ namespace asmr.one
                             //清空目的目录防止带有多余的文件
                             if (Directory.Exists(dest_dir))
                                 Directory.Delete(dest_dir, true);
+                            Thread.Sleep(5000);//略微等待，防止文件正在写入
                             Directory.Move(mid_dir, dest_dir);
                             Directory.Delete(src_dir, true);
                             //清空替换目录
@@ -335,7 +336,7 @@ namespace asmr.one
             var alter =GetAlterWorks();
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
             int ct = 0;
-            int waiting_ct = works.Count(ele => ele.Value.status == Work.Status.Downloading);
+            int downloading_ct = works.Count(ele => ele.Value.status == Work.Status.Downloading);
             foreach (var pair in works)
                 if(pair.Value.status == Work.Status.Waiting)
                 {
@@ -390,7 +391,7 @@ namespace asmr.one
                     ct++;
                     if (ct >= limit)
                         break;
-                    if (ct+waiting_ct >= max_concurrency)
+                    if (ct+downloading_ct >= max_concurrency)
                         break;
                 }
             {
