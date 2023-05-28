@@ -140,7 +140,7 @@ namespace asmr.one
                         await FetchWorkList();
                     //一次下载太多会有429 Too Many Requests?
                     //429的文件会在一定时间内持续429，更换代理可能解除，经过一段时间可能解除
-                    await Download(25,60);
+                    await Download(25,150);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -209,7 +209,7 @@ namespace asmr.one
                         send_ct++;
                         if (send_ct * interval > 1000 * 60 * 60)
                         {
-                            Console.WriteLine("Left IDM Task:"+tasks.Count);
+                            Console.WriteLine("Waiting sending to IDM Task:"+tasks.Count);
                             send_ct = 0;
                         }
                     }
