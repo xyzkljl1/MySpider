@@ -67,7 +67,7 @@ namespace asmr.one
                                             new FuncStringPair(IsR, "Z:/ASMR_ReliableR"),
                                             new FuncStringPair(ReturnTrue, "Z:/ASMR_Reliable") };
         //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
-        static private List<int> ChineseGroupId = new List<int> { 48509,37402,46806,39804, 57900, 64486, 64435 , 74042 };
+        static private List<int> ChineseGroupId = new List<int> { 48509,37402,46806,39804, 57900, 64486, 64435 , 74042, 47550 };
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "Z:/ASMR_Unreliable", "Z:/ASMR_UnreliableR" };
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
@@ -557,8 +557,14 @@ namespace asmr.one
                         {
                             var work = new Work();
                             work.r = work_object.Value<Boolean>("nsfw");
-                            //id即是RJ号，不足6位的补0，多于6位的不变；使用该网站给出的title，title可能为空如RJ087362
-                            work.RJ = String.Format("RJ{0:D6}", id);
+                            //id即是RJ号，5位的补到6位，7位的补到8位；使用该网站给出的title，title可能为空如RJ087362
+                            if (id < 1000000) //6位或更低
+                                work.RJ = String.Format("RJ{0:D6}", id);
+                            else if (id<100000000)//6~8位
+                                work.RJ = String.Format("RJ{0:D8}", id);
+                            else//8位以上(目前无)
+                                work.RJ = String.Format("RJ{0:D10}", id);
+
                             work.group = work_object.Value<int>("circle_id");
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
                             work.title = FileNameCheck(work.title);
