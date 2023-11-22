@@ -234,6 +234,27 @@ namespace asmr.one
                 ret=ret.Substring(0, ret.Length-1);
             return ret;
         }
+        String CutTooLongPath(String sub_dir,int root_dir_length)//如果路径过长则缩短
+        {
+            //个别作品如RJ01087451路径过长，如果下载目的地长度超过256则IDM无法正确命名文件
+            //因此如果完整路径(下载根目录+作品根目录+作品子目录+guid)>256则裁剪
+            if (sub_dir.Length+root_dir_length+TmpDir.Length < 200)
+                return sub_dir;
+            var paths = sub_dir.Split(new char[] { '\\', '/' }).ToList<string>();
+            int ct = sub_dir.Length + root_dir_length + TmpDir.Length - 220;
+            //从叶目录向上逐级缩短目录名,每级最少留下一个字符。(为了尽可能保持相对位置)
+            //裁剪后可能会导致不同文件夹的文件进入同一文件夹从而产生重名问题，但是太少见了，我选择忽略
+            for (int i=paths.Count-1;i>=0;i--)
+                if(paths[i].Length>1&&ct>0)
+                {
+                    int cut_len=Math.Min(paths[i].Length-1, ct);
+                    ct -= cut_len;
+                    paths[i] = paths[i].Substring(0, paths[i].Length - cut_len);
+                }
+            if(ct>0)//已经无法再缩短，但长度仍然过长
+                throw new Exception("Invalid Too Long Path:"+sub_dir);
+            return String.Join("/", paths);
+        }
         private void CheckDownload()
         {
             var downloading_works = new List<String>();
@@ -502,7 +523,7 @@ namespace asmr.one
                     return false;
                 //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
-                    work.files.Add(new Work.File_(title, parent, url));
+                    work.files.Add(new Work.File_(title, CutTooLongPath(parent,work.title.Length), url));
                 return true;
             }
             return false;
@@ -613,7 +634,15 @@ namespace asmr.one
             var ret = new HashSet<int>();
             var response = await Get(query_addr);
             foreach (var id in response.Split(' '))
-                ret.Add(Int32.Parse(id.Substring(2)));
+                try
+                {
+                    ret.Add(Int32.Parse(id.Substring(2)));
+                }
+                catch(Exception ex)
+                {
+                    Console.Write("Unknown RJ code From dlsitehelperserver:"+id);
+                    Console.WriteLine(ex.Message);
+                }
             return ret;
         }
         private async Task<JObject> GetJson(String addr)
