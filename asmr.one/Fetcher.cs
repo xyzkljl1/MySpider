@@ -238,7 +238,7 @@ namespace asmr.one
         {
             //个别作品如RJ01087451路径过长，如果下载目的地长度超过256则IDM无法正确命名文件
             //因此如果完整路径(下载根目录+作品根目录+作品子目录+guid)>256则裁剪
-            if (sub_dir.Length+root_dir_length+TmpDir.Length < 200)
+            if (sub_dir.Length+root_dir_length+TmpDir.Length < 180)
                 return sub_dir;
             var paths = sub_dir.Split(new char[] { '\\', '/' }).ToList<string>();
             int ct = sub_dir.Length + root_dir_length + TmpDir.Length - 220;
