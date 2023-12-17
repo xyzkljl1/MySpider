@@ -238,20 +238,20 @@ namespace asmr.one
         {
             //个别作品如RJ01087451路径过长，如果下载目的地长度超过256则IDM无法正确命名文件
             //因此如果完整路径(下载根目录+作品根目录+作品子目录+guid)>256则裁剪
-            if (sub_dir.Length+root_dir_length+TmpDir.Length < 180)
+            int need_cut = sub_dir.Length + root_dir_length + TmpDir.Length - 180;
+            if (need_cut <=0)
                 return sub_dir;
             var paths = sub_dir.Split(new char[] { '\\', '/' }).ToList<string>();
-            int ct = sub_dir.Length + root_dir_length + TmpDir.Length - 220;
             //从叶目录向上逐级缩短目录名,每级最少留下一个字符。(为了尽可能保持相对位置)
             //裁剪后可能会导致不同文件夹的文件进入同一文件夹从而产生重名问题，但是太少见了，我选择忽略
             for (int i=paths.Count-1;i>=0;i--)
-                if(paths[i].Length>1&&ct>0)
+                if(paths[i].Length>1&&need_cut>0)
                 {
-                    int cut_len=Math.Min(paths[i].Length-1, ct);
-                    ct -= cut_len;
+                    int cut_len=Math.Min(paths[i].Length-1, need_cut);
+                    need_cut -= cut_len;
                     paths[i] = paths[i].Substring(0, paths[i].Length - cut_len);
                 }
-            if(ct>0)//已经无法再缩短，但长度仍然过长
+            if(need_cut>0)//已经无法再缩短，但长度仍然过长
                 throw new Exception("Invalid Too Long Path:"+sub_dir);
             return String.Join("/", paths);
         }
