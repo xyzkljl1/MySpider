@@ -32,11 +32,11 @@ namespace asmr.one
         };
         public struct File_
         {
-            public File_(String _n,String _d,String _u){
+            public File_(String _n,String _d,String _u,int _process_id,int _idx){
                 name = _n;
                 subdir = _d;
                 url = _u;
-                tmp_name = Guid.NewGuid().ToString();//下载用文件名
+                tmp_name = $"{_process_id}_{_idx}";//下载用文件名,用进程id+文件序号以防止重名
                 if(name.Contains("."))//需要使用相同的后缀名以避免IDM弹窗
                     tmp_name+= "."+name.Split('.').Last();
             }
@@ -70,12 +70,14 @@ namespace asmr.one
         static private List<int> ChineseGroupId = new List<int> { 48509,37402,46806,39804, 57900, 64486, 64435 , 74042, 47550, 65763, 1005315, 1001551 };
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "Z:/ASMR_Unreliable", "Z:/ASMR_UnreliableR" };
+        //临时下载目录，IDM传入长度超过256的下载目的地会出现问题，因此TmpDir不能太长
         private String TmpDir = "E:/Tmp/MySpider/ASMRONE";
         public String query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
         private ICIDMLinkTransmitter2 idm = new CIDMLinkTransmitter();
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
         private DateTime LastFetchTime =DateTime.MinValue;
+        private int process_id=0;
         String bearer_token="";
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
@@ -84,6 +86,7 @@ namespace asmr.one
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id= -1;
         public Fetcher() {
+            process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             {
                 var handler = new HttpClientHandler()
@@ -234,27 +237,6 @@ namespace asmr.one
                 ret=ret.Substring(0, ret.Length-1);
             return ret;
         }
-        String CutTooLongPath(String sub_dir,int root_dir_length)//如果路径过长则缩短
-        {
-            //个别作品如RJ01087451路径过长，如果下载目的地长度超过256则IDM无法正确命名文件
-            //因此如果完整路径(下载根目录+作品根目录+作品子目录+guid)>256则裁剪
-            int need_cut = sub_dir.Length + root_dir_length + TmpDir.Length - 180;
-            if (need_cut <=0)
-                return sub_dir;
-            var paths = sub_dir.Split(new char[] { '\\', '/' }).ToList<string>();
-            //从叶目录向上逐级缩短目录名,每级最少留下一个字符。(为了尽可能保持相对位置)
-            //裁剪后可能会导致不同文件夹的文件进入同一文件夹从而产生重名问题，但是太少见了，我选择忽略
-            for (int i=paths.Count-1;i>=0;i--)
-                if(paths[i].Length>1&&need_cut>0)
-                {
-                    int cut_len=Math.Min(paths[i].Length-1, need_cut);
-                    need_cut -= cut_len;
-                    paths[i] = paths[i].Substring(0, paths[i].Length - cut_len);
-                }
-            if(need_cut>0)//已经无法再缩短，但长度仍然过长
-                throw new Exception("Invalid Too Long Path:"+sub_dir);
-            return String.Join("/", paths);
-        }
         private void CheckDownload()
         {
             var downloading_works = new List<String>();
@@ -282,11 +264,11 @@ namespace asmr.one
                         mid_dir = parent_dir + "/Tmp";
                     }
 
-                    var src_dir = TmpDir + "/" + work.title;
+                    var src_dir = $"{TmpDir}/{work.title}";
                     bool done = true;
                     foreach (var file in work.files)
                     {
-                        var src_path = src_dir +"/"+ file.subdir + "/" + file.tmp_name;
+                        var src_path = $"{src_dir}/{file.tmp_name}";
                         if (!File.Exists(src_path))
                             done = false;
                     }
@@ -302,10 +284,10 @@ namespace asmr.one
                             Directory.CreateDirectory(mid_dir);
                             foreach (var file in work.files)
                             {
-                                var dir = mid_dir + "/" + file.subdir;
+                                var dir = $"{mid_dir}/{file.subdir}";
                                 if (!Directory.Exists(dir))
                                     Directory.CreateDirectory(dir);
-                                File.Copy(src_dir + "/" + file.subdir + "/" + file.tmp_name, dir + "/" + file.name, true);
+                                File.Copy($"{src_dir}/{file.tmp_name}", $"{dir}/{file.name}", true);
                             }
                             //清空目的目录防止带有多余的文件
                             if (Directory.Exists(dest_dir))
@@ -397,7 +379,7 @@ namespace asmr.one
                     }
                     foreach (var file in work.files)
                     {
-                        var dir = TmpDir + "/" + work.title + (file.subdir==""?"":"/" + file.subdir);
+                        var dir = TmpDir + "/" + work.title;
                         if (!Directory.Exists(dir))
                             Directory.CreateDirectory(dir);
                         /*
@@ -523,7 +505,7 @@ namespace asmr.one
                     return false;
                 //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
-                    work.files.Add(new Work.File_(title, CutTooLongPath(parent,work.title.Length), url));
+                    work.files.Add(new Work.File_(title, parent, url, this.process_id, work.files.Count));
                 return true;
             }
             return false;
@@ -589,6 +571,8 @@ namespace asmr.one
                             work.group = work_object.Value<int>("circle_id");
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
                             work.title = FileNameCheck(work.title);
+                            if(work.title.Length>100)//IDM传入长度超过256的下载目的地会出现问题，因此裁剪title到100以预防
+                                work.title=work.title.Substring(0,100);
                             if(test_id>0)//测试模式,只下载特定作品
                             {
                                 if(id==test_id)
