@@ -560,7 +560,7 @@ namespace asmr.one
                         {
                             var work = new Work();
                             work.r = work_object.Value<Boolean>("nsfw");
-                            if (work.r)//忽略全年龄作品
+                            if (!work.r)//忽略全年龄作品
                                 continue;
                             //id即是RJ号，5位的补到6位，7位的补到8位；使用该网站给出的title，title可能为空如RJ087362
                             if (id < 1000000) //6位或更低
