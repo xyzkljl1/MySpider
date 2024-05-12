@@ -79,6 +79,7 @@ namespace asmr.one
         private DateTime LastFetchTime =DateTime.MinValue;
         private int process_id=0;
         String bearer_token="";
+        //id to  work,此处的id是asmrone的id，可能不等于dlsite id
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
@@ -243,7 +244,7 @@ namespace asmr.one
             foreach (var work_pair in works)
                 if(work_pair.Value.status ==Work.Status.Downloading)
                 {
-                    var id = work_pair.Key;
+                    var RJ = work_pair.Value.RJ;
                     var work = work_pair.Value;
                     var dest_dir = "";                    
                     var mid_dir ="";
@@ -309,7 +310,7 @@ namespace asmr.one
                         catch (Exception ex)
                         {
                             //视作失败重来
-                            Console.WriteLine("Can't Rename Finished Work " + id+":"+ex.Message);
+                            Console.WriteLine("Can't Rename Finished Work " + RJ+":"+ex.Message);
                             work.fail_ct = 0;
                             work.status = Work.Status.Waiting;
                             work.files.Clear();
@@ -556,12 +557,19 @@ namespace asmr.one
                     {
                         var work_object=item.ToObject<JObject>();
                         var id = work_object.Value<Int32>("id");
+                        var type=work_object.Value<String>("source_type");
+                        if (type!="DLSITE")
+                        {
+                            throw new Exception("not DLSITE");
+                        }
                         if(!works.ContainsKey(id))//此处只获取了基本信息，无需更新
                         {
                             var work = new Work();
                             work.r = work_object.Value<Boolean>("nsfw");
                             if (!work.r)//忽略全年龄作品
                                 continue;
+                            work.RJ= work_object.Value<String>("source_id");
+                            /*
                             //id即是RJ号，5位的补到6位，7位的补到8位；使用该网站给出的title，title可能为空如RJ087362
                             if (id < 1000000) //6位或更低
                                 work.RJ = String.Format("RJ{0:D6}", id);
@@ -569,6 +577,7 @@ namespace asmr.one
                                 work.RJ = String.Format("RJ{0:D8}", id);
                             else//8位以上(目前无)
                                 work.RJ = String.Format("RJ{0:D10}", id);
+                            */
 
                             work.group = work_object.Value<int>("circle_id");
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
