@@ -336,7 +336,7 @@ namespace asmr.one
         }
         private async Task Download(int limit,int max_concurrency)
         {
-            var eliminated = await GetEliminatedWorks();
+            var eliminatedRJ = await GetEliminatedWorksRJ();
             var alter =GetAlterWorks();
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
             int ct = 0;
@@ -352,7 +352,7 @@ namespace asmr.one
                         need_download = true;
                         work.alter_dir = alter[id];
                     }
-                    else if (!eliminated.Contains(id))
+                    else if (!eliminatedRJ.Contains(pair.Value.RJ))
                         need_download = true;
                     else if(test_id==id)//测试模式
                         need_download=true;
@@ -624,20 +624,12 @@ namespace asmr.one
                 }
             return false;
         }
-        private async Task<HashSet<int>> GetEliminatedWorks()
+        private async Task<HashSet<String>> GetEliminatedWorksRJ()
         {
-            var ret = new HashSet<int>();
+            var ret = new HashSet<String>();
             var response = await Get(query_addr);
             foreach (var id in response.Split(' '))
-                try
-                {
-                    ret.Add(Int32.Parse(id.Substring(2)));
-                }
-                catch(Exception ex)
-                {
-                    Console.Write("Unknown RJ code From dlsitehelperserver:"+id);
-                    Console.WriteLine(ex.Message);
-                }
+                ret.Add(id);
             return ret;
         }
         private async Task<JObject> GetJson(String addr)
