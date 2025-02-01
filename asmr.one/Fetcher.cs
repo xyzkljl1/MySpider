@@ -30,9 +30,10 @@ namespace asmr.one
             Downloading,
             Done
         };
-        public struct File_
+        public class File_
         {
             public File_(String _n,String _d,String _u,int _process_id,int _idx){
+                downloaded = false;
                 name = _n;
                 subdir = _d;
                 url = _u;
@@ -44,6 +45,7 @@ namespace asmr.one
             public string name;
             public string subdir;//相对目录
             public string url;
+            public bool downloaded;//仅用于下载任务部分失败时排除已下载的
         }
         public Status status=Status.Waiting;
         public bool r=false;
@@ -90,6 +92,8 @@ namespace asmr.one
             process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             {
+                //直连可以连接和下载，问题是经常抽风，而代理可以稳定连接，用SNI代理也无法改善
+                //直连时api.asmr.one api.asmr-100.com api.asmr-200.com api.asmr-300.com中有的时不时能连上？
                 var handler = new HttpClientHandler()
                 {
                     MaxConnectionsPerServer = 256,
@@ -272,6 +276,8 @@ namespace asmr.one
                         var src_path = $"{src_dir}/{file.tmp_name}";
                         if (!File.Exists(src_path))
                             done = false;
+                        else
+                            file.downloaded = true;
                     }
                     if (done)
                     {
@@ -319,7 +325,7 @@ namespace asmr.one
                     else
                     {
                         work.fail_ct++;
-                        if (work.fail_ct > 2 * (1000 * 60 * 60*24 / download_interval))//两天没下载完视作失败
+                        if (work.fail_ct > 3 * (1000 * 60 * 60 * 24 / download_interval))//三天没下载完视作失败
                         {
                             work.fail_ct = 0;
                             work.status = Work.Status.Waiting;
@@ -379,18 +385,19 @@ namespace asmr.one
                         continue;
                     }
                     foreach (var file in work.files)
-                    {
-                        var dir = TmpDir + "/" + work.title;
-                        if (!Directory.Exists(dir))
-                            Directory.CreateDirectory(dir);
-                        /*
-                         * 使用随机生成的文件名下载
-                         * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
-                         * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
-                        */
-                        lock (tasks)
-                            tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.tmp_name });
-                    }
+                        if(!file.downloaded)
+                        {
+                            var dir = TmpDir + "/" + work.title;
+                            if (!Directory.Exists(dir))
+                                Directory.CreateDirectory(dir);
+                            /*
+                             * 使用随机生成的文件名下载
+                             * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
+                             * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
+                            */
+                            lock (tasks)
+                                tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.tmp_name });
+                        }
                     work.status = Work.Status.Downloading;
                     ct++;
                     if (ct >= limit)
