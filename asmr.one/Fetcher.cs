@@ -367,22 +367,25 @@ namespace asmr.one
                         work.status=Work.Status.Done;
                         continue;
                     }
-                    var tracks_str = await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id));
-                    //网络错误和其它原因(例如网站上没有任何文件时会返回403:No Tracks)都会导致请求不成功，考虑到现在网络较为稳定，不作区分统统标记为Done，不重新尝试
-                    if (tracks_str is null || tracks_str=="")
+                    if(work.files.Count==0)
                     {
-                        Console.WriteLine("Can't Get Track_1 " + work.RJ);
-                        work.status = Work.Status.Done;
-                        continue;
-                    }
-                    bool get_track_success = true;
-                    foreach (var track in (JArray)JsonConvert.DeserializeObject(tracks_str))
-                        get_track_success&=await ParseTracks(work, "", track.ToObject<JObject>());
-                    if (work.files.Count == 0||!get_track_success)//未能正常获取所有文件的跳过
-                    {
-                        Console.WriteLine("Can't Get Track_2 "+work.RJ);
-                        work.status = Work.Status.Done;
-                        continue;
+                        var tracks_str = await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id));
+                        //网络错误和其它原因(例如网站上没有任何文件时会返回403:No Tracks)都会导致请求不成功，考虑到现在网络较为稳定，不作区分统统标记为Done，不重新尝试
+                        if (tracks_str is null || tracks_str == "")
+                        {
+                            Console.WriteLine("Can't Get Track_1 " + work.RJ);
+                            work.status = Work.Status.Done;
+                            continue;
+                        }
+                        bool get_track_success = true;
+                        foreach (var track in (JArray)JsonConvert.DeserializeObject(tracks_str))
+                            get_track_success &= await ParseTracks(work, "", track.ToObject<JObject>());
+                        if (work.files.Count == 0 || !get_track_success)//未能正常获取所有文件的跳过
+                        {
+                            Console.WriteLine("Can't Get Track_2 " + work.RJ);
+                            work.status = Work.Status.Done;
+                            continue;
+                        }
                     }
                     foreach (var file in work.files)
                         if(!file.downloaded)
