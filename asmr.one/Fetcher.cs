@@ -109,7 +109,7 @@ namespace asmr.one
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
-        private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
+        private int download_interval = 1000 * 5 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id= -1;
         public Fetcher() {
@@ -166,14 +166,18 @@ namespace asmr.one
                     return;
                 }
                 //将IDM任务分散发送以避免拥堵
-                _ = Task.Run(() => SendingIDMTask());
+                //_ = Task.Run(() => SendingIDMTask());
                 while (true)
                 {
                     if (index % (24 * 7 * 2 * 1000*60*60/download_interval) == 0)//每2周
                         await FetchWorkList();
-                    //一次下载太多会有429 Too Many Requests?
-                    //429的文件会在一定时间内持续429，更换代理可能解除，经过一段时间可能解除
-                    await Download(25,150);
+                    /*
+                     * 一次下载太多会有429 Too Many Request,429的文件会在一定时间内持续429，更换代理或经过一段时间可能解除
+                     * 500MB以上的文件会在large.kiko-play-niptan.one,其它均在raw.kiko-play-niptan.one
+                     * 而large.kiko-play-niptan.one特别容易触发429 too many requests 导致每个作品都有几个大文件下不下来
+                     * 因为改为不清理临时目录复用之前下载的文件，并且在IDM中把连接数设为1
+                     */
+                    await Download(15,30);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -199,10 +203,6 @@ namespace asmr.one
         }
         public void SendingIDMTask()
         {
-            /*
-             * 500MB以上的文件会在large.kiko-play-niptan.one,其它均在raw.kiko-play-niptan.one
-             * 而large.kiko-play-niptan.one特别容易触发429 too many requests 导致每个作品都有几个大文件下不下来
-             */
             int interval = 60*1000*5;//每隔300s发送一次
             int send_ct = 0;
             try
@@ -418,16 +418,36 @@ namespace asmr.one
                             continue;
                         }
                     }
+                    {
+                        var map =new Dictionary<String, Work.File_>();
+                        foreach (var file in work.files)
+                            if(!map.ContainsKey(file.tmp_name))
+                            {
+                                map.Add(file.tmp_name, file);
+                            }
+                            else
+                            {
+                                var x = map[file.tmp_name];
+                                var y = file;
+                                Console.WriteLine("1");
+                            }
+                    }
                     foreach (var file in work.files)
                         if(!file.downloaded)
                         {
                             var dir = TmpDir + "/" + work.title;
                             if (!Directory.Exists(dir))
                                 Directory.CreateDirectory(dir);
+                            //程序启动前就已经下载的文件
+                            if (!File.Exists($"{dir}/{file.tmp_name}"))
+                            {
+                                file.downloaded = true;
+                                continue;
+                            }
                             /*
-                             * 使用随机生成的文件名下载
-                             * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
-                             * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
+                                * 使用生成的文件名下载
+                                * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
+                                * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
                             */
                             lock (tasks)
                                 tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.tmp_name });
