@@ -12,6 +12,8 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using IDManLib;
 using System.Threading;
+using System.Security.Policy;
+using System.Security.Cryptography;
 
 namespace asmr.one
 {
@@ -32,12 +34,34 @@ namespace asmr.one
         };
         public class File_
         {
-            public File_(String _n,String _d,String _u,int _process_id,int _idx){
+            public string MD5Sum(string input)
+            {
+                // step 1, calculate MD5 hash from input
+
+                MD5 md5 = System.Security.Cryptography.MD5.Create();
+
+                byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(input);
+
+                byte[] hash = md5.ComputeHash(inputBytes);
+
+                // step 2, convert byte array to hex string
+
+                StringBuilder sb = new StringBuilder();
+
+                for (int i = 0; i < hash.Length; i++)
+                {
+                    sb.Append(hash[i].ToString("X2"));
+                }
+
+                return sb.ToString();
+            }
+            public File_(String _n,String _d,String _u){
                 downloaded = false;
                 name = _n;
                 subdir = _d;
                 url = _u;
-                tmp_name = $"{_process_id}_{_idx}";//下载用文件名,用进程id+文件序号以防止重名
+                //临时文件名，用相对路径的hash以防止重名并保证重启后不重新下载
+                tmp_name = MD5Sum($"{subdir}/{name}");
                 if(name.Contains("."))//需要使用相同的后缀名以避免IDM弹窗
                     tmp_name+= "."+name.Split('.').Last();
             }
@@ -127,10 +151,11 @@ namespace asmr.one
             try
             {
                 int index = 0;
-                //清理临时目录
-                if (Directory.Exists(TmpDir))
-                    Directory.Delete(TmpDir, true);
-                Directory.CreateDirectory(TmpDir);
+                //不清理临时目录
+                //if (Directory.Exists(TmpDir))
+                //Directory.Delete(TmpDir, true);
+                if (!Directory.Exists(TmpDir))
+                    Directory.CreateDirectory(TmpDir);
                 foreach(var pair in RootDirs)
                     if (!Directory.Exists(pair.Value))
                         Directory.CreateDirectory(pair.Value);
@@ -174,6 +199,10 @@ namespace asmr.one
         }
         public void SendingIDMTask()
         {
+            /*
+             * 500MB以上的文件会在large.kiko-play-niptan.one,其它均在raw.kiko-play-niptan.one
+             * 而large.kiko-play-niptan.one特别容易触发429 too many requests 导致每个作品都有几个大文件下不下来
+             */
             int interval = 60*1000*5;//每隔300s发送一次
             int send_ct = 0;
             try
@@ -182,7 +211,7 @@ namespace asmr.one
                 {
                     lock(tasks)
                     {
-                        if(tasks.Count>0&& download_interval > interval && interval>0)
+                        if(tasks.Count>0 && interval>0)
                         {
                             try
                             {
@@ -196,7 +225,7 @@ namespace asmr.one
                                 continue;
                             }
                             //auto_start为真时根据剩余任务数量均摊，至少发送一个，否则发送全部
-                            int ct = auto_start ? Math.Max(tasks.Count / (download_interval / interval), 1) : tasks.Count;
+                            int ct = auto_start ? Math.Max(tasks.Count / Math.Max(download_interval / interval,1), 1) : tasks.Count;
                             for (int i=0; i < ct; i++)
                             {
                                 try
@@ -367,7 +396,9 @@ namespace asmr.one
                         work.status=Work.Status.Done;
                         continue;
                     }
-                    if(work.files.Count==0)
+                    if (ct + downloading_ct >= max_concurrency)
+                        continue;
+                    if (work.files.Count==0)
                     {
                         var tracks_str = await Get(String.Format("https://api.asmr.one/api/tracks/{0}", id));
                         //网络错误和其它原因(例如网站上没有任何文件时会返回403:No Tracks)都会导致请求不成功，考虑到现在网络较为稳定，不作区分统统标记为Done，不重新尝试
@@ -404,8 +435,6 @@ namespace asmr.one
                     work.status = Work.Status.Downloading;
                     ct++;
                     if (ct >= limit)
-                        break;
-                    if (ct+downloading_ct >= max_concurrency)
                         break;
                 }
             {
@@ -516,7 +545,7 @@ namespace asmr.one
                     return false;
                 //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
-                    work.files.Add(new Work.File_(title, parent, url, this.process_id, work.files.Count));
+                    work.files.Add(new Work.File_(title, parent, url));
                 return true;
             }
             return false;
