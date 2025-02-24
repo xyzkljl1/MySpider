@@ -107,7 +107,7 @@ namespace asmr.one
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
-        private int download_interval = 1000 * 5 * 60;//每半小时尝试一次下载
+        private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id= -1;
         public Fetcher() {
@@ -164,7 +164,7 @@ namespace asmr.one
                     return;
                 }
                 //将IDM任务分散发送以避免拥堵
-                //_ = Task.Run(() => SendingIDMTask());
+                _ = Task.Run(() => SendingIDMTask());
                 while (true)
                 {
                     if (index % (24 * 7 * 2 * 1000*60*60/download_interval) == 0)//每2周
@@ -437,7 +437,7 @@ namespace asmr.one
                             if (!Directory.Exists(dir))
                                 Directory.CreateDirectory(dir);
                             //程序启动前就已经下载的文件
-                            if (!File.Exists($"{dir}/{file.tmp_name}"))
+                            if (File.Exists($"{dir}/{file.tmp_name}"))
                             {
                                 file.downloaded = true;
                                 continue;
