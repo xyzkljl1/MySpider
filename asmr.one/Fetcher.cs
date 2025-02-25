@@ -107,8 +107,8 @@ namespace asmr.one
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
-        private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
-        private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
+        private int download_interval = 1000 * 5 * 60;//每半小时尝试一次下载
+        private bool auto_start = true;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id= -1;
         public Fetcher() {
             process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
@@ -542,28 +542,51 @@ namespace asmr.one
             }
             else if (json.ContainsKey("mediaDownloadUrl")|| json.ContainsKey("mediaStreamUrl"))
             {
+                //对于某些文件(常见于wav，mp4一般没有fast版)，mediaDownloadUrl是large.kiko-play-niptan.one下的原版文件，而streamLowQualityUrl/mediaStreamUrl中的一个或两个是fast.kiko-play-niptan.one下转换格式后的文件
+                //由于large.kiko-play-niptan.one的rate limit严重，尽量使用另外两种
                 var url_download = json.Value<String>("mediaDownloadUrl");
                 //stream_url要加上token
-                var url_stream = json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
+                var url_stream = json.Value<String>("mediaStreamUrl")==""?"":json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
+                var url_low = json.Value<String>("streamLowQualityUrl")==""?"":json.Value<String>("streamLowQualityUrl") + "?token=" + bearer_token;
                 var title = FileNameCheck(json.Value<String>("title"));
                 bool is_audio = IsAudio(title);
                 var ret_download = await CheckURL(url_download, is_audio);
                 var ret_stream = await CheckURL(url_stream, is_audio);
+                var ret_low = await CheckURL(url_low, is_audio);
                 String url = null;
                 //个别文件的downloadurl无效，而streamurl有效，如RJ061291
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
                 //请求失败可能是短暂的网络错误，此时也视作无效
-                if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download总是优先于url_stream
+                if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
+                {
                     url = url_download;
+                    //对于large.*下的，尽量用别的网址替代，要注意此时格式的变化
+                    if (url.Contains("large.kiko-play-niptan.one"))
+                    {
+                        if (ret_stream == RequestResult.Good && !url_stream.Contains("large.kiko-play-niptan.one"))
+                            url = url_stream;
+                        else if (ret_low == RequestResult.Good && !url_low.Contains("large.kiko-play-niptan.one"))
+                            url = url_low;
+                    }
+                }
                 else if (ret_stream == RequestResult.Good)
                     url = url_stream;
-                else if (ret_download == RequestResult.Skip || ret_stream == RequestResult.Skip)//一个为skip一个为bad/skip则不下载
+                else if (ret_low == RequestResult.Good)
+                    url = url_low;
+                // 如果没有good,且至少一个为skip，说明这是个不需要下载的小文件,跳过
+                else if (ret_download == RequestResult.Skip || ret_stream == RequestResult.Skip||ret_low==RequestResult.Skip)
                     url = null;
-                else if(is_audio)//音频文件都为bad则失败，否则跳过不下载
+                // 如果全部为bad,则返回失败
+                else if (is_audio)
                     return false;
-                //如果不替换则IDM会自动替换非法字符为-
                 if(!(url is null))
+                {
+                    // 用url的后缀改变title
+                    var ext = url.Split('?')[0].Split('/').Last();
+                    ext=ext.Contains('.') ? ext.Substring(ext.LastIndexOf('.')) : "";
+                    title=Path.GetFileNameWithoutExtension(title)+ext;
                     work.files.Add(new Work.File_(title, parent, url));
+                }
                 return true;
             }
             return false;
