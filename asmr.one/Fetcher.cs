@@ -107,8 +107,8 @@ namespace asmr.one
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
-        private int download_interval = 1000 * 5 * 60;//每半小时尝试一次下载
-        private bool auto_start = true;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
+        private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
+        private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id= -1;
         public Fetcher() {
             process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
@@ -175,7 +175,7 @@ namespace asmr.one
                      * 而large.kiko-play-niptan.one特别容易触发429 too many requests 导致每个作品都有几个大文件下不下来
                      * 因为改为不清理临时目录复用之前下载的文件，并且在IDM中把连接数设为1
                      */
-                    await Download(15,30);
+                    await Download(25,150);
                     CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
@@ -546,8 +546,8 @@ namespace asmr.one
                 //由于large.kiko-play-niptan.one的rate limit严重，尽量使用另外两种
                 var url_download = json.Value<String>("mediaDownloadUrl");
                 //stream_url要加上token
-                var url_stream = json.Value<String>("mediaStreamUrl")==""?"":json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token;
-                var url_low = json.Value<String>("streamLowQualityUrl")==""?"":json.Value<String>("streamLowQualityUrl") + "?token=" + bearer_token;
+                var url_stream = (json.ContainsKey("mediaStreamUrl") && json.Value<String>("mediaStreamUrl")!="")?json.Value<String>("mediaStreamUrl")+"?token="+ bearer_token:"";
+                var url_low = (json.ContainsKey("streamLowQualityUrl")&&json.Value<String>("streamLowQualityUrl")!="")?json.Value<String>("streamLowQualityUrl") + "?token=" + bearer_token:"";
                 var title = FileNameCheck(json.Value<String>("title"));
                 bool is_audio = IsAudio(title);
                 var ret_download = await CheckURL(url_download, is_audio);
