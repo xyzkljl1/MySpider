@@ -260,7 +260,7 @@ namespace asmr.one
         String FileNameCheck(String name)//检查单级目录/文件名是否合法
         {
             String ret = name;
-            ret = Regex.Replace(ret, "[/\\\\?*<>:\"|]", "_");
+            ret = Regex.Replace(ret, "[/\\\\?*<>:\"\t|]", "_");
             /* 目录以空格结尾会导致windows和IDM的bug
              * 该目录无法正常删除(可通过压缩文件勾选删除源文件删除)，且打开无空格版本目录会导向该目录
              * 似乎以.结尾也会有问题
@@ -642,6 +642,8 @@ namespace asmr.one
                         {
                             throw new Exception("not DLSITE");
                         }
+                        if(test_id>0&&id != test_id)
+                            continue;
                         if(!works.ContainsKey(id))//此处只获取了基本信息，无需更新
                         {
                             var work = new Work();
@@ -658,26 +660,18 @@ namespace asmr.one
                             else//8位以上(目前无)
                                 work.RJ = String.Format("RJ{0:D10}", id);
                             */
-
+                            //测试模式,只下载特定作品
                             work.group = work_object.Value<int>("circle_id");
                             work.title = String.Format("{0} {1}", work.RJ, work_object.Value<String>("title"));
                             work.title = FileNameCheck(work.title);
                             if(work.title.Length>100)//IDM传入长度超过256的下载目的地会出现问题，因此裁剪title到100以预防
-                                work.title=work.title.Substring(0,100);
-                            if(test_id>0)//测试模式,只下载特定作品
-                            {
-                                if(id==test_id)
-                                {
-                                    works.Add(id, work);
-                                    Console.WriteLine("Page:{0}",p);
-                                    return;
-                                }
-                            }
-                            else
-                                works.Add(id, work);
+                                work.title=work.title.Substring(0,100);                           
+                            works.Add(id, work);
                         }
+                        if (test_id > 0 && id == test_id)
+                            return;
                     }
-                    if(p%100==0)
+                    if (p%100==0)
                         Console.WriteLine("Fetching {0} page", p);
                     //防止请求过快
                     Thread.Sleep(300);
