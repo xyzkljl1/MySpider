@@ -105,7 +105,8 @@ namespace asmr.one
         String bearer_token="";
         //id to  work,此处的id是asmrone的id，可能不等于dlsite id
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
-        private List<String> suffixs=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
+        private List<String> audio_extensions=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
+        public HashSet<string> exclude_extensions = new HashSet<string> { "png", "jpg", "jpeg", "gif", "webp", "tiff", "jfif", "bmp" ,"txt","pdf"};
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
@@ -506,13 +507,15 @@ namespace asmr.one
             }
             return RequestResult.Bad;
         }
+        private bool IsUselessFiles(String title)
+        {
+            var ext =Path.GetExtension(title.ToLower()).TrimStart(new char[]{'.'});
+            return exclude_extensions.Contains(ext);
+        }
         private bool IsAudio(String title)
         {
-            var tmp = title.ToLower();
-            foreach (var suffix in suffixs)
-                if (title.EndsWith(suffix))
-                    return true;
-            return false;
+            var ext = Path.GetExtension(title.ToLower()).TrimStart(new char[] { '.' });
+            return audio_extensions.Contains(ext);
         }
         private async Task<bool> ParseTracks(Work work,String parent,JObject json)
         {
@@ -554,10 +557,14 @@ namespace asmr.one
                 var ret_stream = await CheckURL(url_stream, is_audio);
                 var ret_low = await CheckURL(url_low, is_audio);
                 String url = null;
+                if (IsUselessFiles(title))
+                {
+                    url = null;
+                }
                 //个别文件的downloadurl无效，而streamurl有效，如RJ061291
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
                 //请求失败可能是短暂的网络错误，此时也视作无效
-                if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
+                else if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
                 {
                     url = url_download;
                     //对于large.*下的，尽量用别的网址替代，要注意此时格式的变化
