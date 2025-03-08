@@ -370,8 +370,18 @@ namespace asmr.one
         }
         private async Task Download(int limit,int max_concurrency)
         {
-            var eliminatedRJ = await GetEliminatedWorksRJ();
-            var alter =GetAlterWorks();
+            HashSet<string> eliminatedRJ=null;
+            Dictionary<int, List<String>> alter=null;
+            try
+            {
+                eliminatedRJ = await GetEliminatedWorksRJ();
+                alter = GetAlterWorks();
+            }
+            catch
+            {
+                Console.WriteLine("Fail to get elimintated and alter works.Abort Download");
+                return;
+            }
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
             int ct = 0;
             int downloading_ct = works.Count(ele => ele.Value.status == Work.Status.Downloading);
@@ -709,8 +719,14 @@ namespace asmr.one
         {
             var ret = new HashSet<String>();
             var response = await Get(query_addr);
-            foreach (var id in response.Split(' '))
-                ret.Add(id);
+            if(response is null)
+            {
+                Console.WriteLine("Fail to connnect to DLSiteHelperServer");
+                throw new Exception("abort download");
+            }
+            else
+                foreach (var id in response.Split(' '))
+                    ret.Add(id);
             return ret;
         }
         private async Task<JObject> GetJson(String addr)
