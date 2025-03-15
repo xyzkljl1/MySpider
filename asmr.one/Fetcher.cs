@@ -105,7 +105,7 @@ namespace asmr.one
         String bearer_token="";
         //id to  work,此处的id是asmrone的id，可能不等于dlsite id
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
-        private List<String> audio_extensions=new List<string> { ".mp3",".wav",".wave",".flac", ".wma",".mpa",".ram",".ra",".aac",".aif",".m4a",".tsa",".mp4",".wmv" };
+        private List<String> audio_extensions=new List<string> { "mp3","wav","wave","flac", "wma","mpa","ram","ra","aac","aif","m4a","tsa","mp4","wmv" };
         public HashSet<string> exclude_extensions = new HashSet<string> { "png", "jpg", "jpeg", "gif", "webp", "tiff", "jfif", "bmp" ,"txt","pdf"};
         private Queue<IDMTask> tasks=new Queue<IDMTask>();
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
@@ -434,12 +434,6 @@ namespace asmr.one
                             {
                                 map.Add(file.tmp_name, file);
                             }
-                            else
-                            {
-                                var x = map[file.tmp_name];
-                                var y = file;
-                                Console.WriteLine("1");
-                            }
                     }
                     foreach (var file in work.files)
                         if(!file.downloaded)
@@ -641,7 +635,7 @@ namespace asmr.one
                 var first_page = await GetJson(String.Format(base_url, 1));
                 var total_count = first_page.Value<JObject>("pagination").Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination").Value<Int32>("pageSize");
-                for(int p=0;p*page_size<total_count;p++)//变量p从0开始,页数为p+1
+                for(int p=0;p*page_size<total_count&&p<2500;p++)//变量p从0开始,页数为p+1
                 {
                     var page = await GetJson(String.Format(base_url, p+1));
                     if(page is null)
