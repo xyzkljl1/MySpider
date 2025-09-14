@@ -635,7 +635,7 @@ namespace asmr.one
                 var first_page = await GetJson(String.Format(base_url, 1));
                 var total_count = first_page.Value<JObject>("pagination").Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination").Value<Int32>("pageSize");
-                for(int p=0;p*page_size<total_count&&p<2500;p++)//变量p从0开始,页数为p+1
+                for(int p=0;p*page_size<total_count;p++)//变量p从0开始,页数为p+1
                 {
                     var page = await GetJson(String.Format(base_url, p+1));
                     if(page is null)
