@@ -91,7 +91,9 @@ namespace asmr.one
                                             new FuncStringPair(IsR, "Z:/ASMR_ReliableR"),
                                             new FuncStringPair(ReturnTrue, "Z:/ASMR_Reliable") };
         //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
-        static private List<int> ChineseGroupId = new List<int> { 37402, 39804, 46806, 47550, 48509, 49620, 53009, 57900, 64294,64486, 64435, 65763, 68414, 68744,68414, 70687, 74042, 74454, 1001551, 1005315,  1005809, 1006167, 1001621, 1009187, 1012045, 1012472 };
+        static private List<int> ChineseGroupId = new List<int> { 37402, 39804, 46806, 47550, 48509, 49620, 50114, 53009, 57900, 64294, 63553, 64435, 64486,
+                                                                  65763, 68414,  68414, 68744, 70687, 74042, 74454, 1001551, 1005315, 1005809,
+                                                                  1006167, 1001621, 1009187, 1011490, 1012045, 1012472, 1036219, 1045004, 1054049, 1054434 };
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<String> AlterDirs = new List<string>{ "Z:/ASMR_Unreliable", "Z:/ASMR_UnreliableR" };
         //临时下载目录，IDM传入长度超过256的下载目的地会出现问题，因此TmpDir不能太长
