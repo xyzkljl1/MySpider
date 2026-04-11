@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "asmr.one": {
+      "commandName": "Project",
+      "workingDirectory": "$(OutputDir)"
+    }
+  }
+}
