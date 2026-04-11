@@ -14,6 +14,8 @@ namespace LanguageCheck
         private WhisperFactory factory;
         private WhisperProcessor processor;
         private bool _disposed;
+        // DetectLanguage只使用前约30秒音频，每个采样点读取60秒足够
+        private const int DetectSegmentSeconds = 60;
         public LID()
         {
             string modelPath = ".\\model\\ggml-small.bin";
@@ -48,9 +50,17 @@ namespace LanguageCheck
             }
         }
 
-        public static float[] Read16kMonoPCMFloat32(string audioPath, int len)
+        /// <summary>
+        /// 从音频文件的指定偏移处读取指定长度的16kHz单声道PCM float32数据。
+        /// </summary>
+        /// <param name="audioPath">音频文件路径</param>
+        /// <param name="len">读取长度（秒）</param>
+        /// <param name="offsetSeconds">起始偏移（秒），默认为0</param>
+        public static float[] Read16kMonoPCMFloat32(string audioPath, int len, double offsetSeconds = 0)
         {
             using var reader = CreateReader(audioPath);
+            if (offsetSeconds > 0 && reader.TotalTime.TotalSeconds > offsetSeconds)
+                reader.CurrentTime = TimeSpan.FromSeconds(offsetSeconds);
             ISampleProvider sp = reader.ToSampleProvider();
             if (sp.WaveFormat.SampleRate != 16000)
                 sp = new WdlResamplingSampleProvider(sp, 16000);
@@ -82,26 +92,38 @@ namespace LanguageCheck
 
         private static float[] ReadAllSamples(ISampleProvider sp, int len)
         {
-            var samples = new List<float>(capacity: 16000 * (len+1));
+            int maxSamples = 16000 * len;
+            var samples = new float[maxSamples];
             var buffer = new float[16000]; // 每次读约1秒（mono 16k）
+            int totalRead = 0;
             int read;
-            while ((read = sp.Read(buffer, 0, buffer.Length)) > 0
-                    && samples.Count < 16000 * len)
-                for (int i = 0; i < read; i++)
-                    samples.Add(buffer[i]);
-            return samples.ToArray();
+            while (totalRead < maxSamples
+                    && (read = sp.Read(buffer, 0, Math.Min(buffer.Length, maxSamples - totalRead))) > 0)
+            {
+                Array.Copy(buffer, 0, samples, totalRead, read);
+                totalRead += read;
+            }
+            if (totalRead < maxSamples)
+                return samples.AsSpan(0, totalRead).ToArray();
+            return samples;
         }
         public bool IsChinese(string path)
         {
             if (!File.Exists(path)) throw new FileNotFoundException(path);
             // 读取成 16k mono pcm float32流
             // DetectLanguage似乎不管对于多长的音频，都只取前面一小段进行判断，如果音频前面都没有人声就会判断错误，small/medium/large-v3模型都一样
-            // 因此取前1200秒,在0/3,1/3,2/3处分别进行三次判断，一次命中就算命中
-            var samples = Read16kMonoPCMFloat32(path, 1200);
-            int size = samples.Length;
-            for (int i = 0; i < 3;i++)
+            // 因此获取音频总时长，在0/3,1/3,2/3处分别seek并只读取短片段进行判断，一次命中就算命中
+            double totalSeconds;
+            using (var reader = CreateReader(path))
+                totalSeconds = reader.TotalTime.TotalSeconds;
+
+            for (int i = 0; i < 3; i++)
             {
-                string? detectedLang = processor.DetectLanguage(samples.Skip(size/3*i).ToArray<float>());
+                double offset = totalSeconds / 3 * i;
+                var samples = Read16kMonoPCMFloat32(path, DetectSegmentSeconds, offset);
+                if (samples.Length == 0)
+                    continue;
+                string? detectedLang = processor.DetectLanguage(samples);
                 if (detectedLang == "zh")
                     return true;
             }
