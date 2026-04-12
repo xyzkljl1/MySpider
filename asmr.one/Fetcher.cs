@@ -22,7 +22,7 @@ using MoreLinq;
 namespace asmr.one
 {
     using static System.Runtime.InteropServices.JavaScript.JSType;
-    using FuncStringPair = System.Collections.Generic.KeyValuePair<Func<Fetcher, Work, bool>, string>;
+    using FuncStringPair = System.Collections.Generic.KeyValuePair<Func<LID, Work, bool>, string>;
     public struct IDMTask
     {
         public string name;
@@ -120,7 +120,6 @@ namespace asmr.one
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id = -1;
-        public LID LID= new LID();
         public Fetcher()
         {
             process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
@@ -159,6 +158,7 @@ namespace asmr.one
         public async Task Start()
         {
             {
+                //using var LID = new LID();
                 //var a = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
                 //var b = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
                 //var a2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
@@ -245,7 +245,7 @@ namespace asmr.one
                 Console.WriteLine(ex.StackTrace);
             }
         }
-        private static bool IsChinese(Fetcher f, Work work)
+        private static bool IsChinese(LID LID, Work work)
         {
             if (ChineseGroupId.Contains(work.group))
                 return true;
@@ -259,7 +259,7 @@ namespace asmr.one
             foreach (var file in files)
                 if (ct <= 3)
                 {
-                    var ret = f.LID.IsChinese(file);
+                    var ret = LID.IsChinese(file);
                     if (ret is null)
                         ct++;
                     else
@@ -267,11 +267,11 @@ namespace asmr.one
                 }
             return false;
         }
-        private static bool IsR(Fetcher f,Work work)
+        private static bool IsR(LID LID, Work work)
         {
             return work.r;
         }
-        private static bool ReturnTrue(Fetcher f,Work w)
+        private static bool ReturnTrue(LID LID, Work w)
         {
             return true;
         }
@@ -347,6 +347,7 @@ namespace asmr.one
         }
         private void CheckDownload()
         {
+            using var LID = new LID(); // 只在使用时加载模型，避免长期占用显存
             var downloading_works = new List<string>();
             foreach (var work_pair in works)
                 if (work_pair.Value.status == Work.Status.Downloading)
@@ -363,7 +364,7 @@ namespace asmr.one
                         {
                             string? parent_dir = null;
                             foreach (var pair in RootDirs)//依次根据条件决定下载到哪个目录
-                                if (pair.Key(this, work))
+                                if (pair.Key(LID, work))
                                 {
                                     parent_dir = pair.Value;
                                     break;
