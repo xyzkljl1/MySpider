@@ -390,8 +390,11 @@ namespace asmr.one
                                 if (!Directory.Exists(dir))
                                     Directory.CreateDirectory(dir);
                                 if (isWavOrFlac(file.tmp_name))
-                                    if (ConvertToMp3(new FileInfo($"{dir}/{file.tmp_name}")))
-                                        file.tmp_name = file.tmp_name + ".mp3";
+                                    if (ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
+                                    {
+                                        file.tmp_name += ".mp3";
+                                        file.name += ".mp3";
+                                    }
                                 File.Copy($"{src_dir}/{file.tmp_name}", $"{dir}/{file.name}", true);
                             }
                             //清空目的目录防止带有多余的文件
