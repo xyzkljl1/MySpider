@@ -17,6 +17,7 @@ using System.Security.Cryptography;
 using LanguageCheck;
 using Whisper.net.Wave;
 using System.Diagnostics;
+using MoreLinq;
 
 namespace asmr.one
 {
@@ -97,9 +98,9 @@ namespace asmr.one
                                             new FuncStringPair(IsR, "Z:/ASMR_ReliableR"),
                                             new FuncStringPair(ReturnTrue, "Z:/ASMR_Reliable") };
         //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
-        static private List<int> ChineseGroupId = new List<int> { 37402, 39804, 46806, 47550, 48509, 49620, 50114, 53009, 57900, 64294, 63553, 64435, 64486,
+        static private List<int> ChineseGroupId = new List<int> { 37402, 39322, 39804, 40142, 44853, 46806, 47550, 48509, 49620, 50114, 53009, 55123, 57900, 63016, 64294, 63553, 64435, 64486,
                                                                   65763, 68414,  68414, 68744, 70687, 74042, 74454, 1001551, 1005315, 1005809,
-                                                                  1006167, 1001621, 1009187, 1011490, 1012045, 1012472, 1017685, 1036219, 1045004, 1054049, 1054434 };
+                                                                  1006167, 1001621,1008739, 1009187, 1009377, 1011490, 1012045, 1012472,1013694, 1017685, 1036219, 1045004, 1054049, 1054434 };
         //如果某作品处于以下目录，则删除它们并强制重新下载
         private List<string> AlterDirs = new List<string> { "Z:/ASMR_Unreliable", "Z:/ASMR_UnreliableR" };
         //临时下载目录，IDM传入长度超过256的下载目的地会出现问题，因此TmpDir不能太长
@@ -162,31 +163,45 @@ namespace asmr.one
                 //var b = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
                 //var a2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
                 //var b2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
-                // 选则一个体积最大的音频判断语言。
-/*                bool skip = false;
-                foreach (var dir in new DirectoryInfo("Z:\\ASMR_Chinese").GetDirectories())
+                /*
+                bool skip = true;
+                int totalCt = 0;
+                foreach (var dir in new DirectoryInfo("Z:\\ASMR_ReliableR").GetDirectories())
+                //foreach (var dir in new DirectoryInfo("Z:\\ASMR_Chinese").GetDirectories())
                 {
-                    long max_size = 0;
-                    string path = "";
-                    if (dir.FullName.Contains("RJ01044159"))
+                    if (dir.FullName.Contains("RJ437588"))
                         skip = false;
                     if (skip)
-                        continue;
-                    foreach (var file in Directory.EnumerateFiles(dir.FullName, "*", SearchOption.AllDirectories))
-                        if (IsAudio(file))
+                       continue;
+                    var files = Directory.EnumerateFiles(dir.FullName, "*", SearchOption.AllDirectories).Where(file => IsAudio(file))
+                                   .ToList()
+                                   .Shuffle();
+                    int ct = 0;
+                    bool? ret = false;
+                    // 随机抽取文件检验，不能判断则使用下一个文件，最多重复3次
+                    foreach (var file in files)
+                        if (ct <= 3)
                         {
-                            var size = new FileInfo(file).Length;
-                            if (max_size < size)
+                            var r = LID.IsChinese(file);
+                            if (r is null)
+                                ct++;
+                            else
                             {
-                                max_size = size;
-                                path = file;
+                                ret = r;
+                                break;
                             }
                         }
-                    var ret = path == "" ? false : LID.IsChinese(path);
-                    if (ret  == false)
+
+                    if (ret == true)
                     {
-                        Console.WriteLine("");
+                        Console.WriteLine("CN!!");
+                        dir.MoveTo(Path.Combine(dir.FullName,"..\\..\\ASMR_Chinese\\",dir.Name));
                     }
+                    else if (ret == false)
+                        Console.WriteLine($"{totalCt}");
+                    else if (ret is null)
+                        Console.WriteLine($"{dir} {totalCt}");
+                    totalCt++;
                 }*/
             }
             try
@@ -234,21 +249,23 @@ namespace asmr.one
         {
             if (ChineseGroupId.Contains(work.group))
                 return true;
-            // 选则一个体积最大的音频判断语言。
-            long max_size = 0;
-            string path = "";
             string src_dir = Path.Combine(TmpDir, work.title);
-            foreach (var file in work.files)
-                if (file.downloaded && IsAudio(file.tmp_name))
+            var files = work.files.Where(file => file.downloaded && IsAudio(file.tmp_name))
+                .Select(file => Path.Combine(src_dir, file.tmp_name))
+                .ToList()
+                .Shuffle();
+            int ct = 0;
+            // 随机抽取文件检验，不能判断则使用下一个文件，最多重复3次
+            foreach (var file in files)
+                if (ct <= 3)
                 {
-                    var size = new FileInfo(file.tmp_name).Length;
-                    if (max_size < size)
-                    {
-                        max_size = size;
-                        path = Path.Combine(src_dir, work.title, file.tmp_name);
-                    }
+                    var ret = f.LID.IsChinese(file);
+                    if (ret is null)
+                        ct++;
+                    else
+                        return (bool)ret;
                 }
-            return path == ""?false: f.LID.IsChinese(path);
+            return false;
         }
         private static bool IsR(Fetcher f,Work work)
         {

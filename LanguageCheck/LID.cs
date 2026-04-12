@@ -34,10 +34,12 @@ namespace LanguageCheck
             factory = WhisperFactory.FromPath(modelPath, opt);
             processor = factory.CreateBuilder()
                 .WithLanguage("auto")
+                .WithNoSpeechThreshold(0.5f) // 0.6->0.5,增加将音频视为静音的概率
                 .Build();
         }
         private static WaveStream? CreateReader(string audioPath)
         {
+            // 无法支持长路径，前面加\\?\也不行
             try
             {
                 return new AudioFileReader(audioPath);
@@ -58,26 +60,6 @@ namespace LanguageCheck
                     return null;
                 }
             }
-        }
-
-        // 从视频中截取n段长len(sec)的片段
-        public static List<float[]> Read16kMonoPCMFloat32(string audioPath, int len, int n)
-        {
-            var ret = new List<float[] > { };
-            using var reader = CreateReader(audioPath);
-            if (reader is null)
-                return ret;
-            int totalLen = (int)Math.Floor(reader.TotalTime.TotalSeconds);
-            ISampleProvider sp = reader.ToSampleProvider();
-            if (sp.WaveFormat.SampleRate != SampleRate)
-                sp = new WdlResamplingSampleProvider(sp, SampleRate);
-            sp = ToMono(sp);
-            for(int i=0; i < n; i++)
-            {
-                reader.CurrentTime = TimeSpan.FromSeconds(totalLen / n * i);
-                ret.Add(ReadAllSamples(sp, len));
-            }
-            return ret;
         }
         private static ISampleProvider ToMono(ISampleProvider input)
         {
@@ -111,17 +93,19 @@ namespace LanguageCheck
                 totalRead += read;
             return buffer;
         }
-        public bool IsChineseImp(string path)
+        // 返回null表示无法判断。
+        public bool? IsChineseImp(string path)
         {
-            const int N = 3;
+            const int N = 8;
             if (!File.Exists(path)) throw new FileNotFoundException(path);
             // 读取成 16k mono pcm float32流
             // DetectLanguage似乎不管对于多长的音频，都只取前面一小段进行判断，如果音频前面都没有人声就会判断错误，small/medium/large-v3模型都一样
-            // 因此取前1200秒,在0/3,1/3,2/3处分别进行三次判断，一次命中就算命中
-            // 对于无人声的仍然容易误判
+            // 初始化时略微提高no speech threshold阈值
+            // 均匀截取N段，取第一个高概率确定的语言，都未命中视作失败
+            // 仍然有概率误判，例如全程都是呜呜哇哇的音频，可能以高prob被判定为zh
             using var reader = CreateReader(path);
             if (reader is null)
-                return false;
+                return null;
             int totalLen = (int)Math.Floor(reader.TotalTime.TotalSeconds);
             ISampleProvider sp = reader.ToSampleProvider();
             if (sp.WaveFormat.SampleRate != SampleRate)
@@ -130,13 +114,17 @@ namespace LanguageCheck
             for (int i = 0; i < N; i++)
             {
                 reader.CurrentTime = TimeSpan.FromSeconds(totalLen / N * i);
-                var lang = processor.DetectLanguage(ReadAllSamples(sp, 60));
-                if (lang == "zh")
-                    return true;
+                var (lang, prob) = processor.DetectLanguageWithProbability(ReadAllSamples(sp, 60));
+                if (prob > 0.85f)
+                {
+                    Console.WriteLine($"LID {lang}-{prob:F3} : {path}");
+                    return lang == "zh";
+                }
             }
-            return false;
+            Console.WriteLine($"LID Not Sure : {Path.GetFileName(path)}");
+            return null;
         }
-        public bool IsChinese(string path)
+        public bool? IsChinese(string path)
         {
             var sw = Stopwatch.StartNew();
             var ret = IsChineseImp(path);
