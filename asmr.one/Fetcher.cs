@@ -16,6 +16,7 @@ using System.Security.Policy;
 using System.Security.Cryptography;
 using LanguageCheck;
 using Whisper.net.Wave;
+using System.Diagnostics;
 
 namespace asmr.one
 {
@@ -156,17 +157,21 @@ namespace asmr.one
         }
         public async Task Start()
         {
-            /*
             {
                 //var a = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
                 //var b = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
                 //var a2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
                 //var b2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
                 // 选则一个体积最大的音频判断语言。
-                foreach (var dir in new DirectoryInfo("Z:\\ASMR_ReliableR").GetDirectories())
+/*                bool skip = false;
+                foreach (var dir in new DirectoryInfo("Z:\\ASMR_Chinese").GetDirectories())
                 {
                     long max_size = 0;
                     string path = "";
+                    if (dir.FullName.Contains("RJ01044159"))
+                        skip = false;
+                    if (skip)
+                        continue;
                     foreach (var file in Directory.EnumerateFiles(dir.FullName, "*", SearchOption.AllDirectories))
                         if (IsAudio(file))
                         {
@@ -178,12 +183,12 @@ namespace asmr.one
                             }
                         }
                     var ret = path == "" ? false : LID.IsChinese(path);
-                    if (ret  == true)
+                    if (ret  == false)
                     {
                         Console.WriteLine("");
                     }
-                }
-            }*/
+                }*/
+            }
             try
             {
                 int index = 0;
