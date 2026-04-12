@@ -80,7 +80,6 @@ namespace asmr.one
         public string RJ = "";
         public string title = "";
         public int group = 0;//社团(maker/group/circle)的id
-        public List<string> alter_dir = new List<string>();//由于一些坑爹的原因，可能会有多个
         public List<File_> files = new List<File_>();
         public int fail_ct = 0;
     }
@@ -101,8 +100,6 @@ namespace asmr.one
         static private List<int> ChineseGroupId = new List<int> { 37402, 39322, 39804, 40142, 44853, 46806, 47550, 48509, 49620, 50114, 53009, 55123, 57900, 63016, 64294, 63553, 64435, 64486,
                                                                   65763, 68414,  68414, 68744, 70687, 74042, 74454, 1001551, 1005315, 1005809,
                                                                   1006167, 1001621,1008739, 1009187, 1009377, 1011490, 1012045, 1012472,1013694, 1017685, 1036219, 1045004, 1054049, 1054434 };
-        //如果某作品处于以下目录，则删除它们并强制重新下载
-        private List<string> AlterDirs = new List<string> { "Z:/ASMR_Unreliable", "Z:/ASMR_UnreliableR" };
         //临时下载目录，IDM传入长度超过256的下载目的地会出现问题，因此TmpDir不能太长
         private static string TmpDir = "E:/Tmp/MySpider/ASMRONE";
         public string query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
@@ -116,6 +113,8 @@ namespace asmr.one
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private static List<string> audio_extensions = new List<string> { "mp3", "wav", "wave", "flac", "wma", "mpa", "ram", "ra", "aac", "aif", "m4a", "tsa", "mp4", "wmv" };
         public HashSet<string> exclude_extensions = new HashSet<string> { "png", "jpg", "jpeg", "gif", "webp", "tiff", "jfif", "bmp", "txt", "pdf" };
+        private static HashSet<string> wavflac_extensions = new HashSet<string> { ".wav", ".wave", ".flac" };
+
         private Queue<IDMTask> tasks = new Queue<IDMTask>();
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
@@ -390,6 +389,9 @@ namespace asmr.one
                                 var dir = $"{mid_dir}/{file.subdir}";
                                 if (!Directory.Exists(dir))
                                     Directory.CreateDirectory(dir);
+                                if (isWavOrFlac(file.tmp_name))
+                                    if (ConvertToMp3(new FileInfo($"{dir}/{file.tmp_name}")))
+                                        file.tmp_name = file.tmp_name + ".mp3";
                                 File.Copy($"{src_dir}/{file.tmp_name}", $"{dir}/{file.name}", true);
                             }
                             //清空目的目录防止带有多余的文件
@@ -399,13 +401,7 @@ namespace asmr.one
                             Directory.Move(mid_dir, dest_dir);
                             Directory.Delete(src_dir, true);
                             //清空替换目录
-                            foreach (var dir in work.alter_dir)
-                            {
-                                Directory.Delete(dir, true);
-                                Console.WriteLine("Remove {0}", dir);
-                            }
                             work.status = Work.Status.Done;
-                            work.alter_dir.Clear();
                             work.files.Clear();
                             Console.WriteLine(string.Format("Download {0} Done", work.RJ));
                         }
@@ -436,18 +432,47 @@ namespace asmr.one
             //Console.Write(work+" ");
             Console.WriteLine();
         }
+        public static bool ConvertToMp3(FileInfo fi)
+        {
+            try
+            {
+                var dest = fi.FullName + ".mp3";
+                System.Diagnostics.Process process = new System.Diagnostics.Process();
+                System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo();
+                startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
+                startInfo.FileName = "E:\\MyWebsiteHelper\\ClearSameFile\\ffmpeg.exe";
+                // 加\\?\以支持长路径,C#自身的api支持长路径不需要加，但是某些库不支持
+                startInfo.Arguments = $"-i \"\\\\?\\{fi.FullName}\" -vn -ar 44100 -ac 2 -b:a 441k \"\\\\?\\{dest}\"";
+                if (File.Exists(dest))
+                    File.Delete(dest);
+                process.StartInfo = startInfo;
+                process.Start();
+                process.WaitForExit();
+                if (File.Exists(fi.FullName + ".mp3"))
+                {
+                    fi.Delete();
+                    Console.WriteLine($"Done: {fi.FullName}");
+                }
+                else
+                    throw new Exception("Fail");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Convert Fail:{e.Message}: {fi.FullName}");
+            }
+            return false;
+        }
         private async Task Download(int limit, int max_concurrency)
         {
             HashSet<string> eliminatedRJ;
-            Dictionary<int, List<string>> alter;
             try
             {
                 eliminatedRJ = await GetEliminatedWorksRJ();
-                alter = GetAlterWorks();
             }
             catch
             {
-                Console.WriteLine("Fail to get elimintated and alter works.Abort Download");
+                Console.WriteLine("Fail to get elimintated works.Abort Download");
                 return;
             }
             Dictionary<int, Work> _works = new Dictionary<int, Work>();
@@ -459,12 +484,7 @@ namespace asmr.one
                     bool need_download = false;
                     int id = pair.Key;
                     var work = pair.Value;
-                    if (alter.ContainsKey(id))
-                    {
-                        need_download = true;
-                        work.alter_dir = alter[id];
-                    }
-                    else if (!eliminatedRJ.Contains(pair.Value.RJ))
+                    if (!eliminatedRJ.Contains(pair.Value.RJ))
                         need_download = true;
                     else if (test_id == id)//测试模式
                         need_download = true;
@@ -589,6 +609,10 @@ namespace asmr.one
             var ext = Path.GetExtension(title.ToLower()).TrimStart(new char[] { '.' });
             return audio_extensions.Contains(ext);
         }
+        public static bool isWavOrFlac(string name)
+        {
+            return wavflac_extensions.Contains(Path.GetExtension(name).ToLower());
+        }
         private async Task<bool> ParseTracks(Work work, string parent, JObject json)
         {
             if (json == null)
@@ -669,29 +693,6 @@ namespace asmr.one
                 return true;
             }
             return false;
-        }
-        private Dictionary<int, List<string>> GetAlterWorks()
-        {
-            var ret = new Dictionary<int, List<string>>();
-            var regex = new Regex("[RVBJ]{2}([0-9]{3,8})");
-            foreach (var parent_dir in AlterDirs)
-            {
-                var di = new DirectoryInfo(parent_dir);
-                foreach (DirectoryInfo NextFolder in di.GetDirectories())
-                {
-                    int id = 0;
-                    var matches = regex.Matches(NextFolder.Name);
-                    if (matches.Count > 0)
-                        id = Int32.Parse(matches[0].Groups[1].Value);
-                    else
-                        continue;
-                    if (ret.ContainsKey(id))
-                        ret[id].Append(NextFolder.FullName);
-                    else
-                        ret.Add(id, new List<string> { NextFolder.FullName });
-                }
-            }
-            return ret;
         }
         private async Task FetchWorkList()
         {
