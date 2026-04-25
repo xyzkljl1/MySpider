@@ -442,10 +442,13 @@ namespace asmr.one
                 var dest = fi.FullName + ".mp3";
                 System.Diagnostics.Process process = new System.Diagnostics.Process();
                 System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo();
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+
                 startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
                 startInfo.FileName = "E:\\MyWebsiteHelper\\ClearSameFile\\ffmpeg.exe";
                 // 加\\?\以支持长路径,C#自身的api支持长路径不需要加，但是某些库不支持
-                startInfo.Arguments = $"-i \"\\\\?\\{fi.FullName}\" -vn -ar 44100 -ac 2 -b:a 441k \"\\\\?\\{dest}\"";
+                startInfo.Arguments = $"-i \"\\\\?\\{fi.FullName}\" -vn -ar 32000 -ac 2 -b:a 441k \"\\\\?\\{dest}\"";
                 if (File.Exists(dest))
                     File.Delete(dest);
                 process.StartInfo = startInfo;
@@ -457,7 +460,12 @@ namespace asmr.one
                     Console.WriteLine($"Done: {fi.FullName}");
                 }
                 else
-                    throw new Exception("Fail");
+                {
+                    string stdout = process.StandardOutput.ReadToEnd();
+                    string stderr = process.StandardError.ReadToEnd();
+                    Console.WriteLine($"Fail: {stdout} {stderr}");
+                    return false;
+                }
                 return true;
             }
             catch (Exception e)

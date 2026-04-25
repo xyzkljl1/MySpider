@@ -14,7 +14,7 @@
 
   <ItemGroup>
     <None Update="model\ggml-large-v3.bin">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </None>
     <None Update="model\ggml-medium.bin">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
