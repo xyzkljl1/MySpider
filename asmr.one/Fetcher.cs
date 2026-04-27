@@ -233,7 +233,7 @@ namespace asmr.one
                      * 因为改为不清理临时目录复用之前下载的文件，并且在IDM中把连接数设为1
                      */
                     await Download(25, 150);
-                    CheckDownload();
+                    await CheckDownload();
                     Thread.Sleep(download_interval);
                     index++;
                 }
@@ -344,7 +344,7 @@ namespace asmr.one
                 ret = ret.Substring(0, ret.Length - 1);
             return ret;
         }
-        private void CheckDownload()
+        private async Task CheckDownload()
         {
             using var LID = new LID(); // 只在使用时加载模型，避免长期占用显存
             var downloading_works = new List<string>();
@@ -390,7 +390,7 @@ namespace asmr.one
                                 if (!Directory.Exists(dir))
                                     Directory.CreateDirectory(dir);
                                 if (isWavOrFlac(file.tmp_name))
-                                    if (ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
+                                    if (await ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
                                     {
                                         file.tmp_name += ".mp3";
                                         file.name += ".mp3";
@@ -430,12 +430,12 @@ namespace asmr.one
                             downloading_works.Add(work.RJ);
                     }
                 }
-            Console.Write(string.Format("Downloading Check {0} ", downloading_works.Count));
+            Console.WriteLine(string.Format("Downloading Check {0} ", downloading_works.Count));
             //foreach (var work in downloading_works)
             //Console.Write(work+" ");
-            Console.WriteLine();
+            //Console.WriteLine();
         }
-        public static bool ConvertToMp3(FileInfo fi)
+        public static async Task<bool> ConvertToMp3(FileInfo fi)
         {
             try
             {
@@ -448,12 +448,21 @@ namespace asmr.one
                 startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
                 startInfo.FileName = "E:\\MyWebsiteHelper\\ClearSameFile\\ffmpeg.exe";
                 // 加\\?\以支持长路径,C#自身的api支持长路径不需要加，但是某些库不支持
-                startInfo.Arguments = $"-i \"\\\\?\\{fi.FullName}\" -vn -ar 32000 -ac 2 -b:a 441k \"\\\\?\\{dest}\"";
+                startInfo.Arguments = $"-i \"\\\\?\\{fi.FullName}\" -vn -ar 32000 -ac 2 -b:a 441k \"\\\\?\\{dest}\" 2>&1";
                 if (File.Exists(dest))
                     File.Delete(dest);
                 process.StartInfo = startInfo;
                 process.Start();
-                process.WaitForExit();
+                // 需要持续读取输出，否则当输出缓冲区满了之后ffmpeg会卡死
+                Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+                // Task<string> errorTask = process.StandardError.ReadToEndAsync();//已重定向到stdout
+                if (!process.WaitForExit(new TimeSpan(0,30,0)))
+                {
+                    process.Kill();
+                    await process.WaitForExitAsync();
+                    Console.WriteLine($"Convert Fail0 Timeout: {await outputTask}");
+                    return false;
+                }
                 if (File.Exists(fi.FullName + ".mp3"))
                 {
                     fi.Delete();
@@ -461,9 +470,7 @@ namespace asmr.one
                 }
                 else
                 {
-                    string stdout = process.StandardOutput.ReadToEnd();
-                    string stderr = process.StandardError.ReadToEnd();
-                    Console.WriteLine($"Fail: {stdout} {stderr}");
+                    Console.WriteLine($"Convert Fail1: {await outputTask}");
                     return false;
                 }
                 return true;
