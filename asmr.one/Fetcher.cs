@@ -91,6 +91,24 @@ namespace asmr.one
             Skip,
             Bad
         };
+        private sealed record UrlCheckResult(RequestResult Result, string? MediaType, string? FileName);
+        private static readonly Dictionary<string, string> MediaTypeExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["audio/mpeg"] = ".mp3",
+            ["audio/mp3"] = ".mp3",
+            ["audio/mp4"] = ".m4a",
+            ["video/mp4"] = ".mp4",
+            ["audio/flac"] = ".flac",
+            ["audio/x-flac"] = ".flac",
+            ["audio/wav"] = ".wav",
+            ["audio/x-wav"] = ".wav",
+            ["audio/aac"] = ".aac",
+            ["audio/ogg"] = ".ogg",
+            ["audio/webm"] = ".webm",
+            ["video/webm"] = ".webm",
+            ["audio/x-ms-wma"] = ".wma",
+            ["video/x-ms-wmv"] = ".wmv"
+        };
         //依序检查是否符合条件，符合条件则下载到对应目录
         private List<FuncStringPair> RootDirs = new List<FuncStringPair> {
                                             new FuncStringPair(IsChinese, "Z:/ASMR_Chinese"),
@@ -578,11 +596,38 @@ namespace asmr.one
                 Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready", wait_ct, process_ct, done_ct);
             }
         }
-        private async Task<RequestResult> CheckURL(string? url, bool is_audio)
+        private static string NormalizeExtension(string? extension)
+        {
+            if (string.IsNullOrWhiteSpace(extension))
+                return "";
+            extension = extension.Trim().ToLowerInvariant();
+            if (!extension.StartsWith('.'))
+                extension = "." + extension;
+            return Regex.IsMatch(extension, "^\\.[a-z0-9]{1,10}$") ? extension : "";
+        }
+        private static string GetFileExtension(UrlCheckResult result, string url, string title)
+        {
+            if (!string.IsNullOrWhiteSpace(result.MediaType) && MediaTypeExtensions.TryGetValue(result.MediaType, out var mediaTypeExtension))
+                return mediaTypeExtension;
+
+            var contentDispositionExtension = NormalizeExtension(Path.GetExtension(result.FileName?.Trim('"')));
+            if (contentDispositionExtension != "")
+                return contentDispositionExtension;
+
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                var urlExtension = NormalizeExtension(Path.GetExtension(uri.AbsolutePath));
+                if (urlExtension != "")
+                    return urlExtension;
+            }
+
+            return NormalizeExtension(Path.GetExtension(title));
+        }
+        private async Task<UrlCheckResult> CheckURL(string? url, bool is_audio)
         {
             //DLSite的文件是分段压缩的，此处不是，所以有单个文件会超过2G
             if (url == "" || url is null)
-                return RequestResult.Bad;
+                return new UrlCheckResult(RequestResult.Bad, null, null);
             try
             {
                 /*
@@ -594,19 +639,22 @@ namespace asmr.one
                 using (var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead))
                     if (response.IsSuccessStatusCode)
                     {
+                        var mediaType = response.Content.Headers.ContentType?.MediaType;
+                        var contentDisposition = response.Content.Headers.ContentDisposition;
+                        var fileName = contentDisposition?.FileNameStar ?? contentDisposition?.FileName;
                         if (response.Content.Headers.Contains("Content-Length"))
                         {
                             //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
                             var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
                             if (len == 0)
-                                return RequestResult.Bad;
+                                return new UrlCheckResult(RequestResult.Bad, mediaType, fileName);
                             else if (is_audio && len < 1024 * 200)
-                                return RequestResult.Skip;
+                                return new UrlCheckResult(RequestResult.Skip, mediaType, fileName);
                             else
-                                return RequestResult.Good;
+                                return new UrlCheckResult(RequestResult.Good, mediaType, fileName);
                         }
                         else//有的content类型不带length
-                            return RequestResult.Good;
+                            return new UrlCheckResult(RequestResult.Good, mediaType, fileName);
                     }
             }
             catch (Exception ex)
@@ -615,7 +663,7 @@ namespace asmr.one
                 Console.WriteLine("Check URL Bad:" + ex.Message);
                 Console.WriteLine(ex.StackTrace);
             }
-            return RequestResult.Bad;
+            return new UrlCheckResult(RequestResult.Bad, null, null);
         }
         private bool IsUselessFiles(string title)
         {
@@ -671,6 +719,7 @@ namespace asmr.one
                 var ret_stream = await CheckURL(url_stream, is_audio);
                 var ret_low = await CheckURL(url_low, is_audio);
                 string? url = null;
+                UrlCheckResult? selectedResult = null;
                 if (IsUselessFiles(title))
                 {
                     url = null;
@@ -678,34 +727,47 @@ namespace asmr.one
                 //个别文件的downloadurl无效，而streamurl有效，如RJ061291
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
                 //请求失败可能是短暂的网络错误，此时也视作无效
-                else if (ret_download == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
+                else if (ret_download.Result == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
                 {
                     url = url_download;
+                    selectedResult = ret_download;
                     //对于large.*下的，尽量用别的网址替代，要注意此时格式的变化
                     if (url is not null && url.Contains("large.kiko-play-niptan.one"))
                     {
-                        if (ret_stream == RequestResult.Good && !url_stream.Contains("large.kiko-play-niptan.one"))
+                        if (ret_stream.Result == RequestResult.Good && !url_stream.Contains("large.kiko-play-niptan.one"))
+                        {
                             url = url_stream;
-                        else if (ret_low == RequestResult.Good && !url_low.Contains("large.kiko-play-niptan.one"))
+                            selectedResult = ret_stream;
+                        }
+                        else if (ret_low.Result == RequestResult.Good && !url_low.Contains("large.kiko-play-niptan.one"))
+                        {
                             url = url_low;
+                            selectedResult = ret_low;
+                        }
                     }
                 }
-                else if (ret_stream == RequestResult.Good)
+                else if (ret_stream.Result == RequestResult.Good)
+                {
                     url = url_stream;
-                else if (ret_low == RequestResult.Good)
+                    selectedResult = ret_stream;
+                }
+                else if (ret_low.Result == RequestResult.Good)
+                {
                     url = url_low;
+                    selectedResult = ret_low;
+                }
                 // 如果没有good,且至少一个为skip，说明这是个不需要下载的小文件,跳过
-                else if (ret_download == RequestResult.Skip || ret_stream == RequestResult.Skip || ret_low == RequestResult.Skip)
+                else if (ret_download.Result == RequestResult.Skip || ret_stream.Result == RequestResult.Skip || ret_low.Result == RequestResult.Skip)
                     url = null;
                 // 如果全部为bad,则返回失败
                 else if (is_audio)
                     return false;
-                if (!(url is null))
+                if (!(url is null) && selectedResult is not null)
                 {
-                    // 用url的后缀改变title
-                    var ext = url.Split('?')[0].Split('/').Last();
-                    ext = ext.Contains('.') ? ext.Substring(ext.LastIndexOf('.')) : "";
-                    title = Path.GetFileNameWithoutExtension(title) + ext;
+                    // 优先使用服务器声明的媒体类型，避免URL后缀与实际文件类型不一致时IDM修改文件名
+                    var ext = GetFileExtension(selectedResult, url, title);
+                    if (ext != "")
+                        title = Path.ChangeExtension(title, ext);
                     work.files.Add(new Work.File_(title, parent, url));
                 }
                 return true;
