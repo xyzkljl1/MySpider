@@ -455,47 +455,94 @@ namespace asmr.one
         }
         public static async Task<bool> ConvertToMp3(FileInfo fi)
         {
+            var dest = fi.FullName + ".mp3";
+            var tempDest = dest + ".converting.mp3";
             try
             {
-                var dest = fi.FullName + ".mp3";
-                System.Diagnostics.Process process = new System.Diagnostics.Process();
-                System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo();
-                startInfo.RedirectStandardOutput = true;
-                startInfo.RedirectStandardError = true;
+                if (File.Exists(tempDest))
+                    File.Delete(tempDest);
 
-                startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
-                startInfo.FileName = "E:\\MyWebsiteHelper\\ClearSameFile\\ffmpeg.exe";
+                using System.Diagnostics.Process process = new System.Diagnostics.Process();
+                System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+                    FileName = "E:\\MyWebsiteHelper\\ClearSameFile\\ffmpeg.exe"
+                };
                 // 加\\?\以支持长路径,C#自身的api支持长路径不需要加，但是某些库不支持
-                startInfo.Arguments = $"-i \"\\\\?\\{fi.FullName}\" -vn -ar 32000 -ac 2 -b:a 441k \"\\\\?\\{dest}\" 2>&1";
-                if (File.Exists(dest))
-                    File.Delete(dest);
+                startInfo.ArgumentList.Add("-nostdin");
+                startInfo.ArgumentList.Add("-hide_banner");
+                startInfo.ArgumentList.Add("-loglevel");
+                startInfo.ArgumentList.Add("error");
+                startInfo.ArgumentList.Add("-y");
+                startInfo.ArgumentList.Add("-i");
+                startInfo.ArgumentList.Add($"\\\\?\\{fi.FullName}");
+                startInfo.ArgumentList.Add("-vn");
+                startInfo.ArgumentList.Add("-ar");
+                startInfo.ArgumentList.Add("32000");
+                startInfo.ArgumentList.Add("-ac");
+                startInfo.ArgumentList.Add("2");
+                startInfo.ArgumentList.Add("-b:a");
+                startInfo.ArgumentList.Add("320k");
+                startInfo.ArgumentList.Add($"\\\\?\\{tempDest}");
                 process.StartInfo = startInfo;
                 process.Start();
-                // 需要持续读取输出，否则当输出缓冲区满了之后ffmpeg会卡死
+                // 两个输出流都需要持续读取，否则缓冲区满后ffmpeg会卡死
                 Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
-                // Task<string> errorTask = process.StandardError.ReadToEndAsync();//已重定向到stdout
-                if (!process.WaitForExit(new TimeSpan(0,30,0)))
+                Task<string> errorTask = process.StandardError.ReadToEndAsync();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(30));
+                try
                 {
-                    process.Kill();
+                    await process.WaitForExitAsync(timeout.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!process.HasExited)
+                        process.Kill(true);
                     await process.WaitForExitAsync();
-                    Console.WriteLine($"Convert Fail0 Timeout: {await outputTask}");
+                    Console.WriteLine($"Convert Fail Timeout: {await outputTask} {await errorTask}");
                     return false;
                 }
-                if (File.Exists(fi.FullName + ".mp3"))
+
+                var output = await outputTask;
+                var error = await errorTask;
+                if (process.ExitCode != 0)
                 {
-                    fi.Delete();
-                    Console.WriteLine($"Done: {fi.FullName}");
-                }
-                else
-                {
-                    Console.WriteLine($"Convert Fail1: {await outputTask}");
+                    Console.WriteLine($"Convert Fail ExitCode {process.ExitCode}: {output} {error}");
                     return false;
                 }
+
+                var tempFile = new FileInfo(tempDest);
+                if (!tempFile.Exists || tempFile.Length == 0)
+                {
+                    Console.WriteLine($"Convert Fail Empty Output: {fi.FullName}");
+                    return false;
+                }
+
+                File.Move(tempDest, dest, true);
+                fi.Delete();
+                Console.WriteLine($"Done: {fi.FullName}");
                 return true;
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Convert Fail:{e.Message}: {fi.FullName}");
+            }
+            finally
+            {
+                // 转换失败只删除未完成的临时输出，始终保留源文件
+                try
+                {
+                    if (File.Exists(tempDest))
+                        File.Delete(tempDest);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Delete Convert Temp File Fail:{e.Message}: {tempDest}");
+                }
             }
             return false;
         }
