@@ -58,14 +58,15 @@ namespace asmr.one
 
                 return sb.ToString();
             }
-            public File_(string _n, string _d, string _u)
+            public File_(string _n, string _d, string _u, string? _tmpIdentityName = null)
             {
                 downloaded = false;
                 name = _n;
                 subdir = _d;
                 url = _u;
                 //临时文件名，用相对路径的hash以防止重名并保证重启后不重新下载
-                tmp_name = MD5Sum($"{subdir}/{name}");
+                //扩展名被文件签名修正时仍使用修正前的名称计算hash，以复用IDM已经下载的文件
+                tmp_name = MD5Sum($"{subdir}/{_tmpIdentityName ?? name}");
                 if (name.Contains("."))//需要使用相同的后缀名以避免IDM弹窗
                     tmp_name += "." + name.Split('.').Last();
             }
@@ -98,6 +99,8 @@ namespace asmr.one
             ["audio/mp3"] = ".mp3",
             ["audio/mp4"] = ".m4a",
             ["video/mp4"] = ".mp4",
+            ["video/quicktime"] = ".mov",
+            ["video/x-quicktime"] = ".mov",
             ["audio/flac"] = ".flac",
             ["audio/x-flac"] = ".flac",
             ["audio/wav"] = ".wav",
@@ -670,6 +673,138 @@ namespace asmr.one
 
             return NormalizeExtension(Path.GetExtension(title));
         }
+        private static bool ShouldProbeFileSignature(UrlCheckResult result)
+        {
+            //明确且已知的Content-Type优先使用；仅对缺失、泛型或未知类型增加Range请求
+            return string.IsNullOrWhiteSpace(result.MediaType) || !MediaTypeExtensions.ContainsKey(result.MediaType);
+        }
+        private static bool HasAscii(ReadOnlySpan<byte> data, int offset, string value)
+        {
+            if (offset < 0 || offset + value.Length > data.Length)
+                return false;
+            for (var i = 0; i < value.Length; i++)
+                if (data[offset + i] != (byte)value[i])
+                    return false;
+            return true;
+        }
+        private static int FindAscii(ReadOnlySpan<byte> data, string value)
+        {
+            for (var offset = 0; offset + value.Length <= data.Length; offset++)
+                if (HasAscii(data, offset, value))
+                    return offset;
+            return -1;
+        }
+        private static string DetectIsoBaseMediaExtension(ReadOnlySpan<byte> data)
+        {
+            //ftyp通常是第一个box；也允许前面存在一个很小的free/wide box
+            for (var typeOffset = 4; typeOffset + 8 <= data.Length; typeOffset++)
+            {
+                if (!HasAscii(data, typeOffset, "ftyp"))
+                    continue;
+
+                var boxOffset = typeOffset - 4;
+                var boxSize = ((uint)data[boxOffset] << 24) |
+                              ((uint)data[boxOffset + 1] << 16) |
+                              ((uint)data[boxOffset + 2] << 8) |
+                              data[boxOffset + 3];
+                var availableBoxLength = boxSize >= 12 && boxSize <= int.MaxValue
+                    ? Math.Min(data.Length - boxOffset, (int)boxSize)
+                    : data.Length - boxOffset;
+                var brandStart = typeOffset + 4;
+                var brandEnd = boxOffset + availableBoxLength;
+
+                //QuickTime品牌优先；RJ01604150的文件头为“ftyp qt  ”
+                for (var brandOffset = brandStart; brandOffset + 4 <= brandEnd; brandOffset += 4)
+                    if (HasAscii(data, brandOffset, "qt  "))
+                        return ".mov";
+
+                if (HasAscii(data, brandStart, "M4A ") || HasAscii(data, brandStart, "M4P "))
+                    return ".m4a";
+                if (HasAscii(data, brandStart, "M4B "))
+                    return ".m4b";
+                if (HasAscii(data, brandStart, "3gp"))
+                    return ".3gp";
+                if (HasAscii(data, brandStart, "3g2"))
+                    return ".3g2";
+
+                //其余常见ISO Base Media品牌使用MP4扩展名
+                if (HasAscii(data, brandStart, "isom") || HasAscii(data, brandStart, "iso") ||
+                    HasAscii(data, brandStart, "mp4") || HasAscii(data, brandStart, "avc1") ||
+                    HasAscii(data, brandStart, "dash") || HasAscii(data, brandStart, "MSNV"))
+                    return ".mp4";
+                return "";
+            }
+            return "";
+        }
+        private static string DetectFileExtensionFromSignature(ReadOnlySpan<byte> data)
+        {
+            if (data.Length >= 12 && HasAscii(data, 0, "RIFF") && HasAscii(data, 8, "WAVE"))
+                return ".wav";
+            if (HasAscii(data, 0, "fLaC"))
+                return ".flac";
+            if (HasAscii(data, 0, "OggS"))
+                return ".ogg";
+            if (HasAscii(data, 0, "ID3"))
+                return ".mp3";
+
+            var isoBaseMediaExtension = DetectIsoBaseMediaExtension(data);
+            if (isoBaseMediaExtension != "")
+                return isoBaseMediaExtension;
+
+            //EBML同时用于WebM和Matroska，只有找到DocType后才能安全决定扩展名
+            if (data.Length >= 4 && data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3)
+            {
+                if (FindAscii(data, "webm") >= 0)
+                    return ".webm";
+                if (FindAscii(data, "matroska") >= 0)
+                    return ".mkv";
+            }
+
+            //区分MP3帧同步头和AAC ADTS头
+            if (data.Length >= 2 && data[0] == 0xFF && (data[1] & 0xE0) == 0xE0)
+            {
+                if ((data[1] & 0x06) != 0)
+                    return ".mp3";
+                if ((data[1] & 0xF6) == 0xF0)
+                    return ".aac";
+            }
+            return "";
+        }
+        private async Task<string> ProbeFileExtension(string url)
+        {
+            const int probeLength = 64;
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, probeLength - 1);
+                request.Headers.AcceptEncoding.Clear();
+                request.Headers.AcceptEncoding.ParseAdd("identity");
+                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Probe File Type Bad HTTP {(int)response.StatusCode}");
+                    return "";
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                var buffer = new byte[probeLength];
+                var readLength = 0;
+                while (readLength < buffer.Length)
+                {
+                    var read = await stream.ReadAsync(buffer.AsMemory(readLength, buffer.Length - readLength));
+                    if (read == 0)
+                        break;
+                    readLength += read;
+                }
+                return DetectFileExtensionFromSignature(buffer.AsSpan(0, readLength));
+            }
+            catch (Exception ex)
+            {
+                //探测失败不影响旧下载逻辑，只在日志中记录一行并退回响应头/URL扩展名
+                Console.WriteLine("Probe File Type Bad:" + ex.Message);
+                return "";
+            }
+        }
         private async Task<UrlCheckResult> CheckURL(string? url, bool is_audio)
         {
             //DLSite的文件是分段压缩的，此处不是，所以有单个文件会超过2G
@@ -812,10 +947,23 @@ namespace asmr.one
                 if (!(url is null) && selectedResult is not null)
                 {
                     // 优先使用服务器声明的媒体类型，避免URL后缀与实际文件类型不一致时IDM修改文件名
-                    var ext = GetFileExtension(selectedResult, url, title);
-                    if (ext != "")
-                        title = Path.ChangeExtension(title, ext);
-                    work.files.Add(new Work.File_(title, parent, url));
+                    var fallbackExtension = GetFileExtension(selectedResult, url, title);
+                    var fallbackTitle = fallbackExtension == "" ? title : Path.ChangeExtension(title, fallbackExtension);
+                    var extension = fallbackExtension;
+                    if (ShouldProbeFileSignature(selectedResult))
+                    {
+                        var detectedExtension = await ProbeFileExtension(url);
+                        if (detectedExtension != "")
+                        {
+                            extension = detectedExtension;
+                            if (!string.Equals(extension, fallbackExtension, StringComparison.OrdinalIgnoreCase))
+                                Console.WriteLine($"Correct Extension By Signature:{fallbackExtension} -> {extension} {title}");
+                        }
+                    }
+                    if (extension != "")
+                        title = Path.ChangeExtension(title, extension);
+                    //扩展名改变时保持原有hash主体，只替换后缀，确保能识别IDM已经下载的文件
+                    work.files.Add(new Work.File_(title, parent, url, fallbackTitle));
                 }
                 return true;
             }
