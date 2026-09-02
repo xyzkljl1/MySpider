@@ -175,6 +175,44 @@ namespace asmr.one
                 httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36");
             }
         }
+        private static void CleanupOldTemporaryDirectories()
+        {
+            const int retentionDays = 30;
+            var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+            var deleted = 0;
+            var kept = 0;
+            var failed = 0;
+
+            foreach (var path in Directory.EnumerateDirectories(TmpDir).ToList())
+                try
+                {
+                    var directory = new DirectoryInfo(path);
+                    if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        failed++;
+                        Console.WriteLine("Skip Cleanup Temporary Reparse Point:" + path);
+                        continue;
+                    }
+
+                    var lastWriteTime = directory.LastWriteTimeUtc;
+                    if (lastWriteTime >= cutoff)
+                    {
+                        kept++;
+                        continue;
+                    }
+
+                    Directory.Delete(path, true);
+                    deleted++;
+                    Console.WriteLine($"Cleanup Old Temporary Directory:{path} LastWriteTime:{lastWriteTime:O}");
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    Console.WriteLine($"Cleanup Old Temporary Directory Fail:{ex.Message}:{path}");
+                }
+
+            Console.WriteLine($"Cleanup Temporary Directory Done Deleted:{deleted} Kept:{kept} Failed:{failed}");
+        }
         public async Task Start()
         {
             {
@@ -227,11 +265,9 @@ namespace asmr.one
             try
             {
                 int index = 0;
-                //不清理临时目录
-                //if (Directory.Exists(TmpDir))
-                //Directory.Delete(TmpDir, true);
                 if (!Directory.Exists(TmpDir))
                     Directory.CreateDirectory(TmpDir);
+                CleanupOldTemporaryDirectories();
                 foreach (var pair in RootDirs)
                     if (!Directory.Exists(pair.Value))
                         Directory.CreateDirectory(pair.Value);
