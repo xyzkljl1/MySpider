@@ -18,6 +18,7 @@ using LanguageCheck;
 using Whisper.net.Wave;
 using System.Diagnostics;
 using MoreLinq;
+using MySpider.Core;
 
 namespace asmr.one
 {
@@ -29,14 +30,18 @@ namespace asmr.one
         public string dir;
         public string url;
     }
-    class Work
+    class Work : BaseWork
     {
-        public enum Status
+        private readonly Fetcher module;
+
+        public Work(Fetcher module)
         {
-            Waiting,
-            Downloading,
-            Done
-        };
+            this.module = module;
+        }
+
+        public override string Id => RJ;
+        public override IDownloadModule Module => module;
+        public override bool IgnoreNoDownload => module.IsTestWork(source_id);
         public class File_
         {
             public string MD5Sum(string input)
@@ -76,15 +81,16 @@ namespace asmr.one
             public string url;
             public bool downloaded;//仅用于下载任务部分失败时排除已下载的
         }
-        public Status status = Status.Waiting;
         public bool r = false;
+        public int source_id = 0;
         public string RJ = "";
         public string title = "";
         public int group = 0;//社团(maker/group/circle)的id
         public List<File_> files = new List<File_>();
         public int fail_ct = 0;
+        public bool source_unavailable = false;
     }
-    class Fetcher
+    public class Fetcher : IDownloadModule
     {
         private enum RequestResult
         {
@@ -123,8 +129,7 @@ namespace asmr.one
                                                                   1006167, 1001621,1008739, 1009187, 1009377, 1011490, 1012045, 1012472,1013694, 1017685, 1029695, 1036219, 1045004, 1048599, 1052118, 1054049, 1054434, 1066326, 1067886 };
         //临时下载目录，IDM传入长度超过256的下载目的地会出现问题，因此TmpDir不能太长
         private static string TmpDir = "E:/Tmp/MySpider/ASMRONE";
-        public string query_addr = "http://127.0.0.1:4567/?QueryInvalidDLSite";
-        private ICIDMLinkTransmitter2? idm = new CIDMLinkTransmitter();
+        private ICIDMLinkTransmitter2? idm;
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
         private DateTime LastFetchTime = DateTime.MinValue;
@@ -132,6 +137,7 @@ namespace asmr.one
         string bearer_token = "";
         //id to  work,此处的id是asmrone的id，可能不等于dlsite id
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
+        private Dictionary<string, Work> works_by_rj = new Dictionary<string, Work>(StringComparer.OrdinalIgnoreCase);
         private static List<string> audio_extensions = new List<string> { "mp3", "wav", "wave", "flac", "wma", "mpa", "ram", "ra", "aac", "aif", "m4a", "tsa", "mp4", "wmv" };
         public HashSet<string> exclude_extensions = new HashSet<string> { "png", "jpg", "jpeg", "gif", "webp", "tiff", "jfif", "bmp", "txt", "pdf" };
         private static HashSet<string> wavflac_extensions = new HashSet<string> { ".wav", ".wave", ".flac" };
@@ -140,6 +146,10 @@ namespace asmr.one
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id = -1;
+        private int last_source_id = 0;
+        public string Name => "ASMR.ONE";
+        public TimeSpan UpdateInterval => TimeSpan.FromDays(14);
+        internal bool IsTestWork(int sourceId) => test_id == sourceId;
         public Fetcher()
         {
             process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
@@ -154,7 +164,6 @@ namespace asmr.one
                     CookieContainer = cookies_container,
                     Proxy = new WebProxy("127.0.0.1:1196", false)
                 };
-                handler.ServerCertificateCustomValidationCallback = delegate { return true; };
                 httpClient = new HttpClient(handler);
                 httpClient.Timeout = new TimeSpan(0, 0, 35);
                 httpClient.DefaultRequestHeaders.Referrer = new Uri("https://www.asmr.one");
@@ -213,7 +222,7 @@ namespace asmr.one
 
             Console.WriteLine($"Cleanup Temporary Directory Done Deleted:{deleted} Kept:{kept} Failed:{failed}");
         }
-        public async Task Start()
+        public async Task<bool> InitializeAsync()
         {
             {
                 //using var LID = new LID();
@@ -264,43 +273,41 @@ namespace asmr.one
             }
             try
             {
-                int index = 0;
                 if (!Directory.Exists(TmpDir))
                     Directory.CreateDirectory(TmpDir);
                 CleanupOldTemporaryDirectories();
                 foreach (var pair in RootDirs)
                     if (!Directory.Exists(pair.Value))
                         Directory.CreateDirectory(pair.Value);
+                idm = new CIDMLinkTransmitter();
                 if (!await Login())
                 {
                     Console.WriteLine("Login Fail,Exiting...");
-                    Thread.Sleep(100000);
-                    return;
+                    return false;
                 }
+
                 //将IDM任务分散发送以避免拥堵
                 _ = Task.Run(() => SendingIDMTask());
-                while (true)
-                {
-                    if (index % (24 * 7 * 2 * 1000 * 60 * 60 / download_interval) == 0)//每2周
-                        await FetchWorkList();
-                    /*
-                     * 一次下载太多会有429 Too Many Request,429的文件会在一定时间内持续429，更换代理或经过一段时间可能解除
-                     * 500MB以上的文件会在large.kiko-play-niptan.one,其它均在raw.kiko-play-niptan.one
-                     * 而large.kiko-play-niptan.one特别容易触发429 too many requests 导致每个作品都有几个大文件下不下来
-                     * 因为改为不清理临时目录复用之前下载的文件，并且在IDM中把连接数设为1
-                     */
-                    await Download(25, 150);
-                    await CheckDownload();
-                    Thread.Sleep(download_interval);
-                    index++;
-                }
+                return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Exception:" + ex.Message);
                 Console.WriteLine(ex.StackTrace);
+                return false;
             }
         }
+
+        public Task UpdateAsync()
+        {
+            return FetchWorkList();
+        }
+
+        public IEnumerable<BaseWork> GetDownloadCandidates()
+        {
+            return works.Values.Where(work => !work.source_unavailable).Cast<BaseWork>().ToList();
+        }
+
         private static bool IsChinese(LID LID, Work work)
         {
             if (ChineseGroupId.Contains(work.group))
@@ -401,96 +408,84 @@ namespace asmr.one
                 ret = ret.Substring(0, ret.Length - 1);
             return ret;
         }
-        private async Task CheckDownload()
+        public async Task<DownloadCheckResult> CheckDownloadAsync(string workId, LID LID)
         {
-            using var LID = new LID(); // 只在使用时加载模型，避免长期占用显存
-            var downloading_works = new List<string>();
-            foreach (var work_pair in works)
-                if (work_pair.Value.status == Work.Status.Downloading)
+            var work = works_by_rj[workId];
+
+            var RJ = work.RJ;
+            var src_dir = Path.Combine(TmpDir, work.title);
+            foreach (var file in work.files)
+                file.downloaded = File.Exists(Path.Combine(src_dir, file.tmp_name));
+            if (work.files.All(f => f.downloaded))
+            {
+                try
                 {
-                    var RJ = work_pair.Value.RJ;
-                    var work = work_pair.Value;
-                    var src_dir = Path.Combine(TmpDir, work.title);
+                    string? parent_dir = null;
+                    foreach (var pair in RootDirs)//依次根据条件决定下载到哪个目录
+                        if (pair.Key(LID, work))
+                        {
+                            parent_dir = pair.Value;
+                            break;
+                        }
+                    if (parent_dir is null)
+                        throw (new Exception("Fatal,Invalid RootDir"));
+                    var existingDirectories = Directory.GetDirectories(parent_dir, work.RJ + "*");
+                    if (existingDirectories.Length > 1)
+                        throw new InvalidOperationException(
+                            $"Multiple destination directories found for {work.RJ}: {string.Join(", ", existingDirectories)}");
+                    var dest_dir = existingDirectories.Length == 1
+                        ? existingDirectories[0]
+                        : parent_dir + "/" + work.title;//title包含了RJ号
+                    var mid_dir = parent_dir + "/Tmp";
+
+                    Thread.Sleep(5000);//略微等待，防止文件正在写入
+                                       //Directory没有copy，Move不能跨卷移动
+                                       //先拷贝到同卷的中转目录，防止中途失败导致文件不全
+                    if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
+                        Directory.Delete(mid_dir, true);
+                    Directory.CreateDirectory(mid_dir);
                     foreach (var file in work.files)
-                        file.downloaded = File.Exists(Path.Combine(src_dir, file.tmp_name));
-                    if (work.files.All(f => f.downloaded))
                     {
-                        var dest_dir = "";
-                        var mid_dir = "";
-                        {
-                            string? parent_dir = null;
-                            foreach (var pair in RootDirs)//依次根据条件决定下载到哪个目录
-                                if (pair.Key(LID, work))
-                                {
-                                    parent_dir = pair.Value;
-                                    break;
-                                }
-                            if (parent_dir is null)
-                                throw (new Exception("Fatal,Invalid RootDir"));
-                            foreach (var d in Directory.GetFileSystemEntries(parent_dir, work.RJ + "*"))//如果已经存在则用存在的，否则创建一个
-                                dest_dir = d;
-                            if (dest_dir == "")
-                                dest_dir = parent_dir + "/" + work.title;//title包含了RJ号
-                            mid_dir = parent_dir + "/Tmp";
-                        }
-                        try
-                        {
-                            Thread.Sleep(5000);//略微等待，防止文件正在写入
-                                               //Directory没有copy，Move不能跨卷移动
-                                               //先拷贝到同卷的中转目录，防止中途失败导致文件不全
-                            if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
-                                Directory.Delete(mid_dir, true);
-                            Directory.CreateDirectory(mid_dir);
-                            foreach (var file in work.files)
+                        var dir = $"{mid_dir}/{file.subdir}";
+                        if (!Directory.Exists(dir))
+                            Directory.CreateDirectory(dir);
+                        if (isWavOrFlac(file.tmp_name))
+                            if (await ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
                             {
-                                var dir = $"{mid_dir}/{file.subdir}";
-                                if (!Directory.Exists(dir))
-                                    Directory.CreateDirectory(dir);
-                                if (isWavOrFlac(file.tmp_name))
-                                    if (await ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
-                                    {
-                                        file.tmp_name += ".mp3";
-                                        file.name += ".mp3";
-                                    }
-                                File.Copy($"{src_dir}/{file.tmp_name}", $"{dir}/{file.name}", true);
+                                file.tmp_name += ".mp3";
+                                file.name += ".mp3";
                             }
-                            //清空目的目录防止带有多余的文件
-                            if (Directory.Exists(dest_dir))
-                                Directory.Delete(dest_dir, true);
-                            Thread.Sleep(5000);//略微等待，防止文件正在写入
-                            Directory.Move(mid_dir, dest_dir);
-                            Directory.Delete(src_dir, true);
-                            //清空替换目录
-                            work.status = Work.Status.Done;
-                            work.files.Clear();
-                            Console.WriteLine(string.Format("Download {0} Done", work.RJ));
-                        }
-                        catch (Exception ex)
-                        {
-                            //视作失败重来
-                            Console.WriteLine("Can't Rename Finished Work " + RJ + ":" + ex.Message);
-                            work.fail_ct = 0;
-                            work.status = Work.Status.Waiting;
-                            work.files.Clear();
-                        }
+                        File.Copy($"{src_dir}/{file.tmp_name}", $"{dir}/{file.name}", true);
                     }
-                    else
-                    {
-                        work.fail_ct++;
-                        if (work.fail_ct > 3 * (1000 * 60 * 60 * 24 / download_interval))//三天没下载完视作失败
-                        {
-                            work.fail_ct = 0;
-                            work.status = Work.Status.Waiting;
-                            work.files.Clear();
-                        }
-                        else
-                            downloading_works.Add(work.RJ);
-                    }
+                    //清空目的目录防止带有多余的文件
+                    if (Directory.Exists(dest_dir))
+                        Directory.Delete(dest_dir, true);
+                    Thread.Sleep(5000);//略微等待，防止文件正在写入
+                    Directory.Move(mid_dir, dest_dir);
+                    Directory.Delete(src_dir, true);
+                    work.files.Clear();
+                    Console.WriteLine(string.Format("Download {0} Done", work.RJ));
+                    return DownloadCheckResult.Completed;
                 }
-            Console.WriteLine(string.Format("Downloading Check {0} ", downloading_works.Count));
-            //foreach (var work in downloading_works)
-            //Console.Write(work+" ");
-            //Console.WriteLine();
+                catch (Exception ex)
+                {
+                    //保留已下载文件和文件列表，只释放活动任务并在下一轮重试整理
+                    Console.WriteLine("Can't Finalize Finished Work " + RJ + ":" + ex.Message);
+                    Console.WriteLine(ex.StackTrace);
+                    work.fail_ct = 0;
+                    return DownloadCheckResult.Retry;
+                }
+            }
+
+            work.fail_ct++;
+            if (work.fail_ct > 3 * (1000 * 60 * 60 * 24 / download_interval))//三天没下载完视作失败
+            {
+                work.fail_ct = 0;
+                work.files.Clear();
+                return DownloadCheckResult.Retry;
+            }
+
+            return DownloadCheckResult.Downloading;
         }
         public static async Task<bool> ConvertToMp3(FileInfo fi)
         {
@@ -585,102 +580,59 @@ namespace asmr.one
             }
             return false;
         }
-        private async Task Download(int limit, int max_concurrency)
+        public async Task<bool> StartDownloadAsync(string workId)
         {
-            HashSet<string> eliminatedRJ;
-            try
+            var work = works_by_rj[workId];
+            if (work.files.Count == 0)
             {
-                eliminatedRJ = await GetEliminatedWorksRJ();
-            }
-            catch
-            {
-                Console.WriteLine("Fail to get elimintated works.Abort Download");
-                return;
-            }
-            Dictionary<int, Work> _works = new Dictionary<int, Work>();
-            int ct = 0;
-            int downloading_ct = works.Count(ele => ele.Value.status == Work.Status.Downloading);
-            foreach (var pair in works)
-                if (pair.Value.status == Work.Status.Waiting)
+                var tracks_str = await Get(string.Format("https://api.asmr.one/api/tracks/{0}", work.source_id));
+                //网络错误和其它原因(例如网站上没有任何文件时会返回403:No Tracks)都会导致请求不成功，考虑到现在网络较为稳定，不作区分统统标记为本来源不可用
+                if (tracks_str is null || tracks_str == "")
                 {
-                    bool need_download = false;
-                    int id = pair.Key;
-                    var work = pair.Value;
-                    if (!eliminatedRJ.Contains(pair.Value.RJ))
-                        need_download = true;
-                    else if (test_id == id)//测试模式
-                        need_download = true;
-                    if (!need_download)
-                    {
-                        work.status = Work.Status.Done;
-                        continue;
-                    }
-                    if (ct + downloading_ct >= max_concurrency)
-                        continue;
-                    if (work.files.Count == 0)
-                    {
-                        var tracks_str = await Get(string.Format("https://api.asmr.one/api/tracks/{0}", id));
-                        //网络错误和其它原因(例如网站上没有任何文件时会返回403:No Tracks)都会导致请求不成功，考虑到现在网络较为稳定，不作区分统统标记为Done，不重新尝试
-                        if (tracks_str is null || tracks_str == "")
-                        {
-                            Console.WriteLine("Can't Get Track_1 " + work.RJ);
-                            work.status = Work.Status.Done;
-                            continue;
-                        }
-                        bool get_track_success = true;
-                        foreach (var track in (JArray)JsonConvert.DeserializeObject(tracks_str)!)
-                            get_track_success &= await ParseTracks(work, "", track.ToObject<JObject>()!);
-                        if (work.files.Count == 0 || !get_track_success)//未能正常获取所有文件的跳过
-                        {
-                            Console.WriteLine("Can't Get Track_2 " + work.RJ);
-                            work.status = Work.Status.Done;
-                            continue;
-                        }
-                    }
-                    {
-                        var map = new Dictionary<string, Work.File_>();
-                        foreach (var file in work.files)
-                            if (!map.ContainsKey(file.tmp_name))
-                            {
-                                map.Add(file.tmp_name, file);
-                            }
-                    }
-                    foreach (var file in work.files)
-                        if (!file.downloaded)
-                        {
-                            var dir = TmpDir + "/" + work.title;
-                            if (!Directory.Exists(dir))
-                                Directory.CreateDirectory(dir);
-                            //程序启动前就已经下载的文件
-                            if (File.Exists($"{dir}/{file.tmp_name}"))
-                            {
-                                file.downloaded = true;
-                                continue;
-                            }
-                            /*
-                                * 使用生成的文件名下载
-                                * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
-                                * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
-                            */
-                            lock (tasks)
-                                tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.tmp_name });
-                        }
-                    work.status = Work.Status.Downloading;
-                    ct++;
-                    if (ct >= limit)
-                        break;
+                    Console.WriteLine("Can't Get Track_1 " + work.RJ);
+                    work.source_unavailable = true;
+                    return false;
                 }
-            {
-                int process_ct = 0, wait_ct = 0, done_ct = 0;
-                foreach (var pair in works)
-                    if (pair.Value.status == Work.Status.Downloading)
-                        process_ct++;
-                    else if (pair.Value.status == Work.Status.Waiting)
-                        wait_ct++;
-                    else if (pair.Value.status == Work.Status.Done)
-                        done_ct++;
-                Console.WriteLine("{0} Waiting/{1} Downloading/{2} Ready", wait_ct, process_ct, done_ct);
+
+                bool get_track_success = true;
+                foreach (var track in (JArray)JsonConvert.DeserializeObject(tracks_str)!)
+                    get_track_success &= await ParseTracks(work, "", track.ToObject<JObject>()!);
+                if (work.files.Count == 0 || !get_track_success)//未能正常获取所有文件的跳过
+                {
+                    Console.WriteLine("Can't Get Track_2 " + work.RJ);
+                    work.files.Clear();
+                    work.source_unavailable = true;
+                    return false;
+                }
             }
+
+            work.files = work.files
+                .DistinctBy(file => file.tmp_name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var file in work.files)
+                if (!file.downloaded)
+                {
+                    var dir = TmpDir + "/" + work.title;
+                    if (!Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
+                    //程序启动前就已经下载的文件
+                    if (File.Exists($"{dir}/{file.tmp_name}"))
+                    {
+                        file.downloaded = true;
+                        continue;
+                    }
+                    /*
+                        * 使用生成的文件名下载
+                        * 由于迷之原因，SendLinkToIDM时文件名中的一些字符(例如"母"/"食")会被替换成其它东西，Chrome插件则可以正确下载包含这些字符的文件
+                        * 可能是编码问题，尚不清楚如何解决，通过重命名绕过
+                    */
+                    lock (tasks)
+                        tasks.Enqueue(new IDMTask { url = file.url, dir = dir, name = file.tmp_name });
+                }
+
+            work.fail_ct = 0;
+            return true;
         }
         private static string NormalizeExtension(string? extension)
         {
@@ -925,27 +877,26 @@ namespace asmr.one
             }
             else if (json.ContainsKey("mediaDownloadUrl") || json.ContainsKey("mediaStreamUrl"))
             {
+                var title = FileNameCheck(json.Value<string>("title")!);
+                if (IsUselessFiles(title))
+                    return true;
+
                 //对于某些文件(常见于wav，mp4一般没有fast版)，mediaDownloadUrl是large.kiko-play-niptan.one下的原版文件，而streamLowQualityUrl/mediaStreamUrl中的一个或两个是fast.kiko-play-niptan.one下转换格式后的文件
                 //由于large.kiko-play-niptan.one的rate limit严重，尽量使用另外两种
                 var url_download = json.Value<string>("mediaDownloadUrl");
                 //stream_url要加上token
                 var url_stream = (json.ContainsKey("mediaStreamUrl") && json.Value<string>("mediaStreamUrl") != "") ? json.Value<string>("mediaStreamUrl") + "?token=" + bearer_token : "";
                 var url_low = (json.ContainsKey("streamLowQualityUrl") && json.Value<string>("streamLowQualityUrl") != "") ? json.Value<string>("streamLowQualityUrl") + "?token=" + bearer_token : "";
-                var title = FileNameCheck(json.Value<string>("title")!);
                 bool is_audio = IsAudio(title);
                 var ret_download = await CheckURL(url_download, is_audio);
                 var ret_stream = await CheckURL(url_stream, is_audio);
                 var ret_low = await CheckURL(url_low, is_audio);
                 string? url = null;
                 UrlCheckResult? selectedResult = null;
-                if (IsUselessFiles(title))
-                {
-                    url = null;
-                }
                 //个别文件的downloadurl无效，而streamurl有效，如RJ061291
                 //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
                 //请求失败可能是短暂的网络错误，此时也视作无效
-                else if (ret_download.Result == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
+                if (ret_download.Result == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
                 {
                     url = url_download;
                     selectedResult = ret_download;
@@ -1011,23 +962,33 @@ namespace asmr.one
             {
                 Console.WriteLine("Start Fetch Work List");
                 //seed不知道是什么,subtitle=1是带字幕，subtitle=0包含subtitle=1,page从1开始而非0
-                string base_url = "https://api.asmr.one/api/works?order=id&sort=asc&page={0}&seed=35&subtitle=0";
+                string base_url = "https://api.asmr.one/api/works?order=id&sort=desc&page={0}&seed=35&subtitle=0";
                 var first_page = await GetJson(string.Format(base_url, 1))!;
                 var total_count = first_page!.Value<JObject>("pagination")!.Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination")!.Value<Int32>("pageSize");
+                var new_works = new List<KeyValuePair<int, Work>>();
+                var source_ids_by_rj = works_by_rj.ToDictionary(pair => pair.Key, pair => pair.Value.source_id, StringComparer.OrdinalIgnoreCase);
+                var new_last_source_id = last_source_id;
+                var stop_fetching = false;
                 for (int p = 0; p * page_size < total_count; p++)//变量p从0开始,页数为p+1
                 {
-                    var page = await GetJson(string.Format(base_url, p + 1));
+                    var page = p == 0 ? first_page : await GetJson(string.Format(base_url, p + 1));
                     if (page is null)
                     {
-                        Console.WriteLine("Fail Fetch Page {0}", page);
-                        continue;
+                        Console.WriteLine("Fail Fetch Page {0}", p + 1);
+                        return;
                     }
                     var list = page.Value<JArray>("works");
                     foreach (var item in list!)
                     {
                         var work_object = item.ToObject<JObject>()!;
                         var id = work_object.Value<Int32>("id");
+                        if (test_id <= 0 && id <= last_source_id)
+                        {
+                            stop_fetching = true;
+                            break;
+                        }
+                        new_last_source_id = Math.Max(new_last_source_id, id);
                         var type = work_object.Value<string>("source_type");
                         if (type != "DLSITE")
                         {
@@ -1037,11 +998,15 @@ namespace asmr.one
                             continue;
                         if (!works.ContainsKey(id))//此处只获取了基本信息，无需更新
                         {
-                            var work = new Work();
+                            var work = new Work(this);
+                            work.source_id = id;
                             work.r = work_object.Value<bool>("nsfw");
                             if (!work.r)//忽略全年龄作品
                                 continue;
                             work.RJ = work_object.Value<string>("source_id")!;
+                            if (source_ids_by_rj.TryGetValue(work.RJ, out var existing_source_id))
+                                throw new Exception($"Duplicate RJ {work.RJ}: ASMR.ONE IDs {existing_source_id} and {id}");
+                            source_ids_by_rj.Add(work.RJ, id);
                             /*
                             //id即是RJ号，5位的补到6位，7位的补到8位；使用该网站给出的title，title可能为空如RJ087362
                             if (id < 1000000) //6位或更低
@@ -1057,17 +1022,28 @@ namespace asmr.one
                             work.title = FileNameCheck(work.title);
                             if (work.title.Length > 100)//IDM传入长度超过256的下载目的地会出现问题，因此裁剪title到100以预防
                                 work.title = work.title.Substring(0, 100);
-                            works.Add(id, work);
+                            new_works.Add(new KeyValuePair<int, Work>(id, work));
                         }
                         if (test_id > 0 && id == test_id)
-                            return;
+                        {
+                            stop_fetching = true;
+                            break;
+                        }
                     }
+                    if (stop_fetching)
+                        break;
                     if (p % 100 == 0)
                         Console.WriteLine("Fetching {0} page", p);
                     //防止请求过快
                     Thread.Sleep(300);
                 }
-                Console.WriteLine("Fetch Work List Done {0}/{1}", works.Count, total_count);
+                foreach (var pair in new_works.OrderBy(pair => pair.Key))
+                {
+                    works.Add(pair.Key, pair.Value);
+                    works_by_rj.Add(pair.Value.RJ, pair.Value);
+                }
+                last_source_id = new_last_source_id;
+                Console.WriteLine("Fetch Work List Done Added:{0} Total:{1}/{2}", new_works.Count, works.Count, total_count);
             }
             catch (Exception ex)
             {
@@ -1087,20 +1063,6 @@ namespace asmr.one
                     return true;
                 }
             return false;
-        }
-        private async Task<HashSet<string>> GetEliminatedWorksRJ()
-        {
-            var ret = new HashSet<string>();
-            var response = await Get(query_addr);
-            if (response is null)
-            {
-                Console.WriteLine("Fail to connnect to DLSiteHelperServer");
-                throw new Exception("abort download");
-            }
-            else
-                foreach (var id in response.Split(' '))
-                    ret.Add(id);
-            return ret;
         }
         private async Task<JObject?> GetJson(string addr)
         {
