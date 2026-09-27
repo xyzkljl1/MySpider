@@ -316,7 +316,7 @@ namespace Telegram
                     if (files.Count == 0)
                     {
                         Console.WriteLine(
-                            $"[Telegram] No target documents; marked unavailable for this run: " +
+                            $"[Telegram] No target files; marked unavailable for this run: " +
                             $"{work.Id} message {work.MessageId}");
                         unavailableWorkIds[work.Id] = work.MessageId;
                         return false;
@@ -642,8 +642,8 @@ namespace Telegram
             while (true)
             {
                 var history = await client.GetMessageThreadHistoryAsync(
-                    chatId: channel.Id,
-                    messageId: work.MessageId,
+                    chatId: thread.ChatId,
+                    messageId: thread.MessageThreadId,
                     fromMessageId: fromMessageId,
                     offset: 0,
                     limit: HistoryPageSize);
@@ -665,15 +665,22 @@ namespace Telegram
             {
                 if (message.SenderId is not MessageSenderChat sender || sender.ChatId != thread.ChatId)
                     continue;
-                if (message.Content is not MessageDocument content)
+
+                (int FileId, string FileName)? source = message.Content switch
+                {
+                    MessageDocument content => (content.Document.Document_.Id, content.Document.FileName),
+                    MessageVideo content => (content.Video.Video_.Id, content.Video.FileName),
+                    _ => null
+                };
+                if (source is null)
                     continue;
 
-                var fileName = SanitizeFileName(Path.GetFileName(content.Document.FileName));
+                var fileName = SanitizeFileName(Path.GetFileName(source.Value.FileName));
                 if (fileName == "")
-                    throw new InvalidOperationException($"Telegram document {message.Id} has no valid file name.");
+                    throw new InvalidOperationException($"Telegram file {message.Id} has no valid file name.");
                 if (!fileNames.Add(fileName))
                     throw new InvalidOperationException($"Duplicate Telegram file name {fileName} in {work.Id}.");
-                files.Add(new TelegramDownloadFile(content.Document.Document_.Id, fileName));
+                files.Add(new TelegramDownloadFile(source.Value.FileId, fileName));
             }
 
             return files;
