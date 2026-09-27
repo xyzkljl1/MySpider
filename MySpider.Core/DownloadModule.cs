@@ -29,4 +29,9 @@ namespace MySpider.Core
         Task<DownloadCheckResult> CheckDownloadAsync(string workId, LID LID);
     }
 
+    public interface IExcludedWorkConsumer
+    {
+        void SetExcludedWorkIds(IReadOnlySet<string> ids);
+    }
+
 }

@@ -71,7 +71,8 @@ namespace MySpider
                 Directory.Delete(destinationDirectory, true);
             Thread.Sleep(5000); //略微等待，防止文件正在写入
             Directory.Move(stagingDirectory, destinationDirectory);
-            Directory.Delete(download.TemporaryDirectory, true);
+            if (download.DeleteTemporaryDirectory)
+                Directory.Delete(download.TemporaryDirectory, true);
         }
     }
 }

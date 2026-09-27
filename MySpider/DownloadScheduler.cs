@@ -68,6 +68,24 @@ namespace MySpider
 
         private async Task RunCycleAsync(IReadOnlyCollection<IDownloadModule> initializedModules)
         {
+            var canStartNewDownloads = false;
+            try
+            {
+                var currentNoDownloadIds = await GetNoDownloadIdsAsync();
+                noDownloadIds.Clear();
+                noDownloadIds.UnionWith(currentNoDownloadIds);
+
+                var excludedIds = new HashSet<string>(noDownloadIds, StringComparer.OrdinalIgnoreCase);
+                excludedIds.UnionWith(completedIds);
+                foreach (var consumer in initializedModules.OfType<IExcludedWorkConsumer>())
+                    consumer.SetExcludedWorkIds(excludedIds);
+                canStartNewDownloads = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to get no-download IDs; no new task will start this cycle: {ex.Message}");
+            }
+
             var now = DateTime.UtcNow;
             foreach (var module in initializedModules)
                 if (now - lastUpdates[module] >= module.UpdateInterval)
@@ -87,17 +105,8 @@ namespace MySpider
                     }
                 }
 
-            try
-            {
-                var currentNoDownloadIds = await GetNoDownloadIdsAsync();
-                noDownloadIds.Clear();
-                noDownloadIds.UnionWith(currentNoDownloadIds);
+            if (canStartNewDownloads)
                 await StartNewDownloadsAsync(initializedModules);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to get no-download IDs; no new task will start this cycle: {ex.Message}");
-            }
 
             await CheckDownloadsAsync();
             Console.WriteLine($"[Scheduler] NoDownload:{noDownloadIds.Count} Completed:{completedIds.Count} Downloading:{downloading.Count}");

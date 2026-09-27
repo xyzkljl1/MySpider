@@ -17,7 +17,8 @@ namespace MySpider.Core
         string DirectoryName,
         string TemporaryDirectory,
         DownloadDirectoryKind DirectoryKind,
-        IReadOnlyList<DownloadedFile> Files);
+        IReadOnlyList<DownloadedFile> Files,
+        bool DeleteTemporaryDirectory = true);
 
     public interface IDownloadDirectoryManager
     {

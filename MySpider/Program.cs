@@ -39,7 +39,7 @@ namespace MySpider
                     var scheduler = new DownloadScheduler(new IDownloadModule[]
                     {
                         new Fetcher(downloadDirectories, config.Proxy, paths.Ffmpeg),
-                        new TelegramModule(telegram, config.Proxy)
+                        new TelegramModule(telegram, config.Proxy, downloadDirectories)
                     });
                     scheduler.RunAsync().Wait();
                 }
