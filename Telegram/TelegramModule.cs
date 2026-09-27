@@ -82,6 +82,7 @@ namespace Telegram
         private readonly IDownloadDirectoryManager downloadDirectoryManager;
         private readonly Dictionary<string, TelegramWork> works = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, long> locallyExcludedWorkIds = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, long> unavailableWorkIds = new(StringComparer.OrdinalIgnoreCase);
         private HashSet<string> excludedWorkIds = new(StringComparer.OrdinalIgnoreCase);
         private TdClient? client;
         private TdApi.Chat? channel;
@@ -89,10 +90,11 @@ namespace Telegram
         private string mediaDirectory = "";
         private string cursorPath = "";
         private long? cursor;
+        private bool includeCursorMessage;
         private bool hasExcludedWorkIds;
 
         public string Name => "Telegram";
-        public TimeSpan UpdateInterval => TimeSpan.FromMinutes(30);
+        public TimeSpan UpdateInterval => TimeSpan.FromDays(7);
 
         public TelegramModule(
             TelegramOptions options,
@@ -122,10 +124,16 @@ namespace Telegram
                 if (File.Exists(cursorPath))
                 {
                     var cursorText = File.ReadAllText(cursorPath).Trim();
-                    if (!long.TryParse(cursorText, out var savedCursor) || savedCursor < 0)
+                    var cursorParts = cursorText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (cursorParts.Length is < 1 or > 2 ||
+                        !long.TryParse(cursorParts[0], out var savedCursor) || savedCursor < 0 ||
+                        (cursorParts.Length == 2 && cursorParts[1] != "inclusive"))
                         throw new InvalidOperationException("Telegram cursor.txt is invalid.");
                     cursor = savedCursor;
-                    Console.WriteLine($"[Telegram] Loaded cursor: {savedCursor}");
+                    includeCursorMessage = cursorParts.Length == 2;
+                    Console.WriteLine(
+                        $"[Telegram] Loaded cursor: {savedCursor}" +
+                        (includeCursorMessage ? " (inclusive)" : ""));
                 }
 
                 client = new TdClient();
@@ -134,7 +142,7 @@ namespace Telegram
                     filesDirectory: mediaDirectory,
                     useFileDatabase: true,
                     useChatInfoDatabase: true,
-                    useMessageDatabase: false,
+                    useMessageDatabase: true,
                     useSecretChats: false,
                     apiId: options.ApiId,
                     apiHash: options.ApiHash,
@@ -193,20 +201,29 @@ namespace Telegram
 
             if (cursor is null)
             {
-                cursor = await FindInitialCursorAsync();
-                SaveCursor(cursor.Value);
-                Console.WriteLine($"[Telegram] Initial cursor: {cursor.Value}");
+                (cursor, includeCursorMessage) = await FindInitialCursorAsync();
+                SaveCursor(cursor.Value, includeCursorMessage);
+                Console.WriteLine(
+                    $"[Telegram] Initial cursor: {cursor.Value}" +
+                    (includeCursorMessage ? " (inclusive)" : ""));
             }
 
-            var messages = await GetMessagesAfterCursorAsync(cursor.Value, MaximumScannedMessages);
+            var maximumMessageDate = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeSeconds();
+            var messages = await GetMessagesAfterCursorAsync(
+                cursor.Value,
+                includeCursorMessage,
+                MaximumScannedMessages,
+                maximumMessageDate);
             if (messages.Count == 0)
             {
-                Console.WriteLine($"[Telegram] No message after cursor {cursor.Value}.");
+                Console.WriteLine($"[Telegram] No message older than one day after cursor {cursor.Value}.");
                 return;
             }
 
             var oldCursor = cursor.Value;
+            var oldIncludeCursorMessage = includeCursorMessage;
             var newCursor = oldCursor;
+            var newIncludeCursorMessage = oldIncludeCursorMessage;
             var pendingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var scanned = 0;
             foreach (var message in messages)
@@ -215,7 +232,10 @@ namespace Telegram
                 if (!TryCreateWork(message, out var discoveredWork))
                 {
                     if (pendingIds.Count == 0)
+                    {
                         newCursor = message.Id;
+                        newIncludeCursorMessage = false;
+                    }
                     continue;
                 }
 
@@ -235,7 +255,10 @@ namespace Telegram
                 if (IsExcluded(discoveredWork.Id))
                 {
                     if (pendingIds.Count == 0)
+                    {
                         newCursor = message.Id;
+                        newIncludeCursorMessage = false;
+                    }
                     continue;
                 }
 
@@ -249,13 +272,20 @@ namespace Telegram
                     break;
             }
 
-            if (newCursor > oldCursor)
+            if (newCursor != oldCursor || newIncludeCursorMessage != oldIncludeCursorMessage)
             {
                 cursor = newCursor;
-                SaveCursor(newCursor);
+                includeCursorMessage = newIncludeCursorMessage;
+                SaveCursor(newCursor, newIncludeCursorMessage);
             }
             foreach (var pair in locallyExcludedWorkIds.Where(pair => pair.Value <= cursor.Value).ToList())
                 locallyExcludedWorkIds.Remove(pair.Key);
+            foreach (var pair in unavailableWorkIds.Where(pair => pair.Value <= cursor.Value).ToList())
+            {
+                unavailableWorkIds.Remove(pair.Key);
+                if (works.TryGetValue(pair.Key, out var work) && !work.Active)
+                    works.Remove(pair.Key);
+            }
 
             Console.WriteLine(
                 $"[Telegram] Scan done: messages={scanned}, pending={pendingIds.Count}, " +
@@ -285,8 +315,10 @@ namespace Telegram
                     var files = await GetWorkFilesAsync(work);
                     if (files.Count == 0)
                     {
-                        Console.WriteLine($"[Telegram] No target documents: {work.Id} message {work.MessageId}");
-                        work.NextStartAttemptUtc = DateTime.UtcNow.AddHours(6);
+                        Console.WriteLine(
+                            $"[Telegram] No target documents; marked unavailable for this run: " +
+                            $"{work.Id} message {work.MessageId}");
+                        unavailableWorkIds[work.Id] = work.MessageId;
                         return false;
                     }
 
@@ -414,18 +446,37 @@ namespace Telegram
 
         private bool IsExcluded(string workId)
         {
-            return excludedWorkIds.Contains(workId) || locallyExcludedWorkIds.ContainsKey(workId);
+            return excludedWorkIds.Contains(workId) ||
+                locallyExcludedWorkIds.ContainsKey(workId) ||
+                unavailableWorkIds.ContainsKey(workId);
         }
 
-        private async Task<long> FindInitialCursorAsync()
+        private async Task<(long Value, bool Inclusive)> FindInitialCursorAsync()
         {
             if (client is null || channel is null)
                 throw new InvalidOperationException("Telegram channel is not initialized.");
 
-            Console.WriteLine("[Telegram] Locating the oldest channel message; media will not be downloaded.");
-            long fromMessageId = 0;
-            long oldestMessageId = 0;
-            var pages = 0;
+            Console.WriteLine("[Telegram] Locating the oldest channel message by date; media will not be downloaded.");
+            var minimumDate = 0;
+            var maximumDate = checked((int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            var newestMessage = await GetChatMessageByDateOrNullAsync(maximumDate);
+            if (newestMessage is null)
+                return (0, false);
+
+            while (minimumDate < maximumDate)
+            {
+                var middleDate = minimumDate + (maximumDate - minimumDate) / 2;
+                if (await GetChatMessageByDateOrNullAsync(middleDate) is null)
+                    minimumDate = middleDate + 1;
+                else
+                    maximumDate = middleDate;
+                await Task.Delay(RequestInterval);
+            }
+
+            var firstMessageAtDate = await GetChatMessageByDateOrNullAsync(minimumDate)
+                ?? throw new InvalidOperationException("Telegram oldest-message lookup returned an inconsistent result.");
+            var oldestMessageId = firstMessageAtDate.Id;
+            var fromMessageId = firstMessageAtDate.Id;
             while (true)
             {
                 var history = await client.GetChatHistoryAsync(
@@ -442,16 +493,36 @@ namespace Telegram
                     break;
                 oldestMessageId = oldestInPage;
                 fromMessageId = oldestInPage;
-                pages++;
-                if (pages % 100 == 0)
-                    Console.WriteLine($"[Telegram] Initial history scan: {pages * HistoryPageSize} messages.");
                 await Task.Delay(RequestInterval);
             }
 
-            return oldestMessageId > 0 ? oldestMessageId - 1 : 0;
+            return (oldestMessageId, true);
         }
 
-        private async Task<List<TdApi.Message>> GetMessagesAfterCursorAsync(long afterMessageId, int limit)
+        private async Task<TdApi.Message?> GetChatMessageByDateOrNullAsync(int date)
+        {
+            if (client is null || channel is null)
+                throw new InvalidOperationException("Telegram channel is not initialized.");
+
+            try
+            {
+                return await client.ExecuteAsync(new TdApi.GetChatMessageByDate
+                {
+                    ChatId = channel.Id,
+                    Date = date
+                });
+            }
+            catch (TdException ex) when (ex.Error.Code == 404)
+            {
+                return null;
+            }
+        }
+
+        private async Task<List<TdApi.Message>> GetMessagesAfterCursorAsync(
+            long afterMessageId,
+            bool includeStartingMessage,
+            int limit,
+            long maximumMessageDate)
         {
             if (client is null || channel is null)
                 throw new InvalidOperationException("Telegram channel is not initialized.");
@@ -481,23 +552,32 @@ namespace Telegram
                 }
 
                 var newerMessages = history.Messages_
-                    .Where(message => message.Id > position)
+                    .Where(message =>
+                        message.Id > position ||
+                        (includeStartingMessage && message.Id == position))
                     .OrderBy(message => message.Id)
                     .ToList();
                 if (newerMessages.Count == 0)
                     break;
 
-                foreach (var message in newerMessages)
+                var eligibleMessages = newerMessages
+                    .Where(message => message.Date <= maximumMessageDate)
+                    .ToList();
+                foreach (var message in eligibleMessages)
                 {
                     messages.TryAdd(message.Id, message);
                     if (messages.Count == limit)
                         break;
                 }
 
-                var nextPosition = newerMessages[^1].Id;
+                if (eligibleMessages.Count < newerMessages.Count || eligibleMessages.Count == 0)
+                    break;
+
+                var nextPosition = eligibleMessages[^1].Id;
                 if (nextPosition <= position)
                     break;
                 position = nextPosition;
+                includeStartingMessage = false;
                 if (messages.Count < limit)
                     await Task.Delay(RequestInterval);
             }
@@ -599,9 +679,12 @@ namespace Telegram
             return files;
         }
 
-        private void SaveCursor(long value)
+        private void SaveCursor(long value, bool inclusive)
         {
-            File.WriteAllText(cursorPath, value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var text = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (inclusive)
+                text += " inclusive";
+            File.WriteAllText(cursorPath, text);
         }
 
         private async Task<bool> LoginAsync()

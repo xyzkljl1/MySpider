@@ -42,7 +42,14 @@ namespace MySpider
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(download.DirectoryKind), download.DirectoryKind, null)
             };
-            var existingDirectories = Directory.GetDirectories(parentDirectory, download.WorkId + "*");
+            var existingDirectories = Directory.EnumerateDirectories(parentDirectory)
+                .Where(path =>
+                {
+                    var directoryName = Path.GetFileName(path);
+                    return directoryName.Equals(download.WorkId, StringComparison.OrdinalIgnoreCase) ||
+                           directoryName.StartsWith(download.WorkId + " ", StringComparison.OrdinalIgnoreCase);
+                })
+                .ToArray();
             if (existingDirectories.Length > 1)
                 throw new InvalidOperationException(
                     $"Multiple destination directories found for {download.WorkId}: {string.Join(", ", existingDirectories)}");
