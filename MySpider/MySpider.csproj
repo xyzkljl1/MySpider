@@ -14,4 +14,8 @@
     <ProjectReference Include="..\Telegram\Telegram.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="config.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('config.json')" />
+  </ItemGroup>
+
 </Project>

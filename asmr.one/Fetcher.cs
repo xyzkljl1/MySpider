@@ -23,7 +23,6 @@ using MySpider.Core;
 namespace asmr.one
 {
     using static System.Runtime.InteropServices.JavaScript.JSType;
-    using FuncStringPair = System.Collections.Generic.KeyValuePair<Func<LID, Work, bool>, string>;
     public struct IDMTask
     {
         public string name;
@@ -118,17 +117,14 @@ namespace asmr.one
             ["audio/x-ms-wma"] = ".wma",
             ["video/x-ms-wmv"] = ".wmv"
         };
-        //依序检查是否符合条件，符合条件则下载到对应目录
-        private List<FuncStringPair> RootDirs = new List<FuncStringPair> {
-                                            new FuncStringPair(IsChinese, "Z:/ASMR_Chinese"),
-                                            new FuncStringPair(IsR, "Z:/ASMR_ReliableR"),
-                                            new FuncStringPair(ReturnTrue, "Z:/ASMR_Reliable") };
         //几个中文社团的id，前面加上RG则是DLSite的RG号(如RG48509),同时是ASMRONE的circleId
         static private List<int> ChineseGroupId = new List<int> { 37402, 39322, 39804, 40142, 44853, 46806, 47550, 48509, 49620, 50114, 53009, 55123, 57900, 63016, 64294, 63553, 64435, 64486,
                                                                   65763, 68414, 68744, 70687, 74042, 74454, 1001551, 1005315, 1005809,
                                                                   1006167, 1001621,1008739, 1009187, 1009377, 1011490, 1012045, 1012472,1013694, 1017685, 1029695, 1036219, 1045004, 1048599, 1052118, 1054049, 1054434, 1066326, 1067886 };
-        //临时下载目录，IDM传入长度超过256的下载目的地会出现问题，因此TmpDir不能太长
-        private static string TmpDir = "E:/Tmp/MySpider/ASMRONE";
+        //IDM传入长度超过256的下载目的地会出现问题，因此入口传入的临时目录不能太长
+        private readonly string TmpDir;
+        private readonly IDownloadDirectoryManager downloadDirectoryManager;
+        private readonly string ffmpegPath;
         private ICIDMLinkTransmitter2? idm;
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
@@ -150,8 +146,14 @@ namespace asmr.one
         public string Name => "ASMR.ONE";
         public TimeSpan UpdateInterval => TimeSpan.FromDays(14);
         internal bool IsTestWork(int sourceId) => test_id == sourceId;
-        public Fetcher()
+        public Fetcher(
+            IDownloadDirectoryManager downloadDirectoryManager,
+            string proxy,
+            string ffmpegPath)
         {
+            this.downloadDirectoryManager = downloadDirectoryManager ?? throw new ArgumentNullException(nameof(downloadDirectoryManager));
+            this.ffmpegPath = ffmpegPath;
+            TmpDir = downloadDirectoryManager.GetTemporaryDirectory(Name);
             process_id = System.Diagnostics.Process.GetCurrentProcess().Id;
             System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             {
@@ -162,7 +164,7 @@ namespace asmr.one
                     MaxConnectionsPerServer = 256,
                     UseCookies = true,
                     CookieContainer = cookies_container,
-                    Proxy = new WebProxy("127.0.0.1:1196", false)
+                    Proxy = new WebProxy(proxy, false)
                 };
                 httpClient = new HttpClient(handler);
                 httpClient.Timeout = new TimeSpan(0, 0, 35);
@@ -184,7 +186,7 @@ namespace asmr.one
                 httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36");
             }
         }
-        private static void CleanupOldTemporaryDirectories()
+        private void CleanupOldTemporaryDirectories()
         {
             const int retentionDays = 30;
             var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
@@ -224,61 +226,14 @@ namespace asmr.one
         }
         public async Task<bool> InitializeAsync()
         {
-            {
-                //using var LID = new LID();
-                //var a = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
-                //var b = await LID.ToText("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
-                //var a2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\nn.mp3");
-                //var b2 = LID.IsChinese("E:\\MyWebsiteHelper\\MySpider\\LanguageCheck\\model\\out.wav");
-                /*
-                bool skip = true;
-                int totalCt = 0;
-                foreach (var dir in new DirectoryInfo("Z:\\ASMR_ReliableR").GetDirectories())
-                //foreach (var dir in new DirectoryInfo("Z:\\ASMR_Chinese").GetDirectories())
-                {
-                    if (dir.FullName.Contains("RJ437588"))
-                        skip = false;
-                    if (skip)
-                       continue;
-                    var files = Directory.EnumerateFiles(dir.FullName, "*", SearchOption.AllDirectories).Where(file => IsAudio(file))
-                                   .ToList()
-                                   .Shuffle();
-                    int ct = 0;
-                    bool? ret = false;
-                    // 随机抽取文件检验，不能判断则使用下一个文件，最多重复3次
-                    foreach (var file in files)
-                        if (ct <= 3)
-                        {
-                            var r = LID.IsChinese(file);
-                            if (r is null)
-                                ct++;
-                            else
-                            {
-                                ret = r;
-                                break;
-                            }
-                        }
-
-                    if (ret == true)
-                    {
-                        Console.WriteLine("CN!!");
-                        dir.MoveTo(Path.Combine(dir.FullName,"..\\..\\ASMR_Chinese\\",dir.Name));
-                    }
-                    else if (ret == false)
-                        Console.WriteLine($"{totalCt}");
-                    else if (ret is null)
-                        Console.WriteLine($"{dir} {totalCt}");
-                    totalCt++;
-                }*/
-            }
             try
             {
                 if (!Directory.Exists(TmpDir))
                     Directory.CreateDirectory(TmpDir);
                 CleanupOldTemporaryDirectories();
-                foreach (var pair in RootDirs)
-                    if (!Directory.Exists(pair.Value))
-                        Directory.CreateDirectory(pair.Value);
+                foreach (var directory in downloadDirectoryManager.FinalDirectories)
+                    if (!Directory.Exists(directory))
+                        Directory.CreateDirectory(directory);
                 idm = new CIDMLinkTransmitter();
                 if (!await Login())
                 {
@@ -308,7 +263,7 @@ namespace asmr.one
             return works.Values.Where(work => !work.source_unavailable).Cast<BaseWork>().ToList();
         }
 
-        private static bool IsChinese(LID LID, Work work)
+        private bool IsChinese(LID LID, Work work)
         {
             if (ChineseGroupId.Contains(work.group))
                 return true;
@@ -333,10 +288,6 @@ namespace asmr.one
         private static bool IsR(LID LID, Work work)
         {
             return work.r;
-        }
-        private static bool ReturnTrue(LID LID, Work w)
-        {
-            return true;
         }
         public void SendingIDMTask()
         {
@@ -420,49 +371,32 @@ namespace asmr.one
             {
                 try
                 {
-                    string? parent_dir = null;
-                    foreach (var pair in RootDirs)//依次根据条件决定下载到哪个目录
-                        if (pair.Key(LID, work))
-                        {
-                            parent_dir = pair.Value;
-                            break;
-                        }
-                    if (parent_dir is null)
-                        throw (new Exception("Fatal,Invalid RootDir"));
-                    var existingDirectories = Directory.GetDirectories(parent_dir, work.RJ + "*");
-                    if (existingDirectories.Length > 1)
-                        throw new InvalidOperationException(
-                            $"Multiple destination directories found for {work.RJ}: {string.Join(", ", existingDirectories)}");
-                    var dest_dir = existingDirectories.Length == 1
-                        ? existingDirectories[0]
-                        : parent_dir + "/" + work.title;//title包含了RJ号
-                    var mid_dir = parent_dir + "/Tmp";
-
-                    Thread.Sleep(5000);//略微等待，防止文件正在写入
-                                       //Directory没有copy，Move不能跨卷移动
-                                       //先拷贝到同卷的中转目录，防止中途失败导致文件不全
-                    if (Directory.Exists(mid_dir))//清空中转目录防止带有多余的文件
-                        Directory.Delete(mid_dir, true);
-                    Directory.CreateDirectory(mid_dir);
+                    var directoryKind = IsChinese(LID, work)
+                        ? DownloadDirectoryKind.Chinese
+                        : IsR(LID, work)
+                            ? DownloadDirectoryKind.ReliableR
+                            : DownloadDirectoryKind.Reliable;
+                    var downloadedFiles = new List<DownloadedFile>(work.files.Count);
                     foreach (var file in work.files)
                     {
-                        var dir = $"{mid_dir}/{file.subdir}";
-                        if (!Directory.Exists(dir))
-                            Directory.CreateDirectory(dir);
                         if (isWavOrFlac(file.tmp_name))
                             if (await ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
                             {
                                 file.tmp_name += ".mp3";
                                 file.name += ".mp3";
                             }
-                        File.Copy($"{src_dir}/{file.tmp_name}", $"{dir}/{file.name}", true);
+                        downloadedFiles.Add(new DownloadedFile(
+                            Path.Combine(src_dir, file.tmp_name),
+                            file.subdir,
+                            file.name));
                     }
-                    //清空目的目录防止带有多余的文件
-                    if (Directory.Exists(dest_dir))
-                        Directory.Delete(dest_dir, true);
-                    Thread.Sleep(5000);//略微等待，防止文件正在写入
-                    Directory.Move(mid_dir, dest_dir);
-                    Directory.Delete(src_dir, true);
+
+                    downloadDirectoryManager.FinalizeDownload(new CompletedDownload(
+                        work.RJ,
+                        work.title,
+                        src_dir,
+                        directoryKind,
+                        downloadedFiles));
                     work.files.Clear();
                     Console.WriteLine(string.Format("Download {0} Done", work.RJ));
                     return DownloadCheckResult.Completed;
@@ -487,7 +421,7 @@ namespace asmr.one
 
             return DownloadCheckResult.Downloading;
         }
-        public static async Task<bool> ConvertToMp3(FileInfo fi)
+        public async Task<bool> ConvertToMp3(FileInfo fi)
         {
             var dest = fi.FullName + ".mp3";
             var tempDest = dest + ".converting.mp3";
@@ -504,7 +438,7 @@ namespace asmr.one
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
-                    FileName = "E:\\MyWebsiteHelper\\ClearSameFile\\ffmpeg.exe"
+                    FileName = ffmpegPath
                 };
                 // 加\\?\以支持长路径,C#自身的api支持长路径不需要加，但是某些库不支持
                 startInfo.ArgumentList.Add("-nostdin");

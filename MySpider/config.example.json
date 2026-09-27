@@ -1,0 +1,15 @@
+{
+  "Proxy": "<proxy-host>:<proxy-port>",
+  "Paths": {
+    "TemporaryRoot": "<temporary-download-directory>",
+    "Chinese": "<chinese-output-directory>",
+    "ReliableR": "<reliable-r-output-directory>",
+    "Reliable": "<reliable-output-directory>",
+    "Ffmpeg": "<ffmpeg-executable-path>"
+  },
+  "Telegram": {
+    "ApiId": 0,
+    "ApiHash": "",
+    "PhoneNumber": ""
+  }
+}

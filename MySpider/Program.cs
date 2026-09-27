@@ -31,11 +31,15 @@ namespace MySpider
 
                 using (BlockSyncContext.Enter())
                 {
+                    var config = ApplicationConfig.Load();
+                    var paths = config.Paths!;
+                    var telegram = config.Telegram!;
+                    var downloadDirectories = new DownloadDirectoryManager(paths);
                     //模块顺序即下载优先级；同一 RJ 同时存在时优先使用排在前面的 ASMR.ONE。
                     var scheduler = new DownloadScheduler(new IDownloadModule[]
                     {
-                        new Fetcher(),
-                        new TelegramModule()
+                        new Fetcher(downloadDirectories, config.Proxy, paths.Ffmpeg),
+                        new TelegramModule(telegram, config.Proxy)
                     });
                     scheduler.RunAsync().Wait();
                 }
