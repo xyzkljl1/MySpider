@@ -397,7 +397,7 @@ namespace asmr.one
                                 {
                                     var task = tasks.Dequeue();
                                     //TODO:IDM未启动时，SendLinkToIDM可以自动启动IDM，然而有时还是会出现IDM崩溃、SendLinkToIDM抛出RPC服务不可用的异常、无法自动启动IDM的情况，WHY？或许是因为缓存硬盘故障？
-                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, auto_start ? 0x01 : 0x02);
+                                    idm.SendLinkToIDM(task.url, "", "", "", "", "", task.dir, task.name, auto_start ? 0x01 : 0x03);
                                 }
                                 catch (Exception ex)//任务太多或其它情况时idm服务可能卡死，此时终止该次下载尝试，而不终止程序，防止某个文件多的作品卡死idm导致反复重启
                                 {
