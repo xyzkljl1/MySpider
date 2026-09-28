@@ -88,8 +88,9 @@ namespace asmr.one
         public List<File_> files = new List<File_>();
         public int fail_ct = 0;
         public bool source_unavailable = false;
+        public bool cursor_resolved = false;
     }
-    public class Fetcher : IDownloadModule
+    public class Fetcher : IDownloadModule, IExcludedWorkConsumer
     {
         private enum RequestResult
         {
@@ -137,12 +138,18 @@ namespace asmr.one
         private static List<string> audio_extensions = new List<string> { "mp3", "wav", "wave", "flac", "wma", "mpa", "ram", "ra", "aac", "aif", "m4a", "tsa", "mp4", "wmv" };
         public HashSet<string> exclude_extensions = new HashSet<string> { "png", "jpg", "jpeg", "gif", "webp", "tiff", "jfif", "bmp", "txt", "pdf" };
         private static HashSet<string> wavflac_extensions = new HashSet<string> { ".wav", ".wave", ".flac" };
+        private static readonly string RuntimeDirectory =
+            Path.GetDirectoryName(typeof(Fetcher).Assembly.Location)!;
 
         private Queue<IDMTask> tasks = new Queue<IDMTask>();
         private int download_interval = 1000 * 30 * 60;//每半小时尝试一次下载
         private bool auto_start = false;//true:分批向IDM发送任务并立刻开始下载任务 false:一次向IDM发送所有任务，不立刻开始下载(等待IDM的每日自动队列下载)
         private int test_id = -1;
         private int last_source_id = 0;
+        private HashSet<string> excludedWorkIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool hasExcludedWorkIds = false;
+        private string cursorPath = "";
+        private int cursor = 0;
         public string Name => "ASMR.ONE";
         public TimeSpan UpdateInterval => TimeSpan.FromDays(14);
         internal bool IsTestWork(int sourceId) => test_id == sourceId;
@@ -228,6 +235,22 @@ namespace asmr.one
         {
             try
             {
+                var dataDirectory = Path.Combine(RuntimeDirectory, ".asmrone");
+                cursorPath = Path.Combine(dataDirectory, "cursor.txt");
+                Directory.CreateDirectory(dataDirectory);
+                if (File.Exists(cursorPath))
+                {
+                    var cursorText = File.ReadAllText(cursorPath).Trim();
+                    if (!int.TryParse(cursorText, out cursor) || cursor < 0)
+                        throw new InvalidOperationException("ASMR.ONE cursor.txt is invalid.");
+                    Console.WriteLine($"[ASMR.ONE] Loaded cursor: {cursor}");
+                }
+                else
+                {
+                    Console.WriteLine("[ASMR.ONE] No saved cursor; scanning from the beginning.");
+                }
+                last_source_id = cursor;
+
                 if (!Directory.Exists(TmpDir))
                     Directory.CreateDirectory(TmpDir);
                 CleanupOldTemporaryDirectories();
@@ -258,9 +281,63 @@ namespace asmr.one
             return FetchWorkList();
         }
 
+        public void SetExcludedWorkIds(IReadOnlySet<string> ids)
+        {
+            excludedWorkIds = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+            hasExcludedWorkIds = true;
+            AdvanceCursor();
+        }
+
         public IEnumerable<BaseWork> GetDownloadCandidates()
         {
-            return works.Values.Where(work => !work.source_unavailable).Cast<BaseWork>().ToList();
+            return works.Values
+                .Where(work => work.source_id > cursor && !work.source_unavailable)
+                .Cast<BaseWork>()
+                .ToList();
+        }
+
+        private void AdvanceCursor()
+        {
+            if (!hasExcludedWorkIds || last_source_id <= cursor || cursorPath == "")
+                return;
+
+            var firstPendingSourceId = works.Values
+                .Where(work => work.source_id > cursor)
+                .Where(work => !work.cursor_resolved && !excludedWorkIds.Contains(work.RJ))
+                .Select(work => work.source_id)
+                .DefaultIfEmpty(last_source_id + 1)
+                .Min();
+            var newCursor = Math.Min(last_source_id, firstPendingSourceId - 1);
+            if (newCursor <= cursor)
+                return;
+
+            var oldCursor = cursor;
+            var temporaryCursorPath = cursorPath + ".tmp";
+            try
+            {
+                File.WriteAllText(
+                    temporaryCursorPath,
+                    newCursor.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                File.Move(temporaryCursorPath, cursorPath, true);
+                cursor = newCursor;
+                Console.WriteLine($"[ASMR.ONE] Cursor advanced: {oldCursor}->{newCursor}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ASMR.ONE] Save cursor failed: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryCursorPath))
+                        File.Delete(temporaryCursorPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ASMR.ONE] Delete temporary cursor failed: {ex.Message}");
+                }
+            }
         }
 
         private bool IsChinese(LID LID, Work work)
@@ -398,6 +475,8 @@ namespace asmr.one
                         directoryKind,
                         downloadedFiles));
                     work.files.Clear();
+                    excludedWorkIds.Add(work.RJ);
+                    AdvanceCursor();
                     Console.WriteLine(string.Format("Download {0} Done", work.RJ));
                     return DownloadCheckResult.Completed;
                 }
@@ -519,23 +598,39 @@ namespace asmr.one
             var work = works_by_rj[workId];
             if (work.files.Count == 0)
             {
-                var tracks_str = await Get(string.Format("https://api.asmr.one/api/tracks/{0}", work.source_id));
-                //网络错误和其它原因(例如网站上没有任何文件时会返回403:No Tracks)都会导致请求不成功，考虑到现在网络较为稳定，不作区分统统标记为本来源不可用
-                if (tracks_str is null || tracks_str == "")
+                var (tracks_str, noTracks) = await GetTracks(work.source_id);
+                if (noTracks)
+                {
+                    Console.WriteLine("No Tracks " + work.RJ);
+                    work.source_unavailable = true;
+                    work.cursor_resolved = true;
+                    AdvanceCursor();
+                    return false;
+                }
+                if (string.IsNullOrEmpty(tracks_str))
                 {
                     Console.WriteLine("Can't Get Track_1 " + work.RJ);
-                    work.source_unavailable = true;
                     return false;
                 }
 
                 bool get_track_success = true;
                 foreach (var track in (JArray)JsonConvert.DeserializeObject(tracks_str)!)
                     get_track_success &= await ParseTracks(work, "", track.ToObject<JObject>()!);
-                if (work.files.Count == 0 || !get_track_success)//未能正常获取所有文件的跳过
+                if (!get_track_success)
                 {
                     Console.WriteLine("Can't Get Track_2 " + work.RJ);
                     work.files.Clear();
                     work.source_unavailable = true;
+                    work.cursor_resolved = true;
+                    AdvanceCursor();
+                    return false;
+                }
+                if (work.files.Count == 0)
+                {
+                    Console.WriteLine("No Downloadable Track " + work.RJ);
+                    work.source_unavailable = true;
+                    work.cursor_resolved = true;
+                    AdvanceCursor();
                     return false;
                 }
             }
@@ -977,6 +1072,7 @@ namespace asmr.one
                     works_by_rj.Add(pair.Value.RJ, pair.Value);
                 }
                 last_source_id = new_last_source_id;
+                AdvanceCursor();
                 Console.WriteLine("Fetch Work List Done Added:{0} Total:{1}/{2}", new_works.Count, works.Count, total_count);
             }
             catch (Exception ex)
@@ -1034,6 +1130,29 @@ namespace asmr.one
                     Thread.Sleep(20);
                 }
             return null;
+        }
+        private async Task<(string? Content, bool NoTracks)> GetTracks(int sourceId)
+        {
+            var addr = string.Format("https://api.asmr.one/api/tracks/{0}", sourceId);
+            for (int i = 5; i > 0; --i)
+                try
+                {
+                    using var response = await httpClient.GetAsync(addr);
+                    var content = await response.Content.ReadAsStringAsync();
+                    if (response.IsSuccessStatusCode)
+                        return (content, false);
+                    if (content.Contains("No tracks found", StringComparison.OrdinalIgnoreCase))
+                        return (null, true);
+
+                    Console.WriteLine(content);
+                    throw new Exception($"HTTP Not Success: {(int)response.StatusCode}");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Request Fail :" + e.Message);
+                    Thread.Sleep(20);
+                }
+            return (null, false);
         }
         private async Task<string?> Post(string addr, string data, Encoding encoding, string type)
         {

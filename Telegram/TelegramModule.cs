@@ -208,88 +208,107 @@ namespace Telegram
                     (includeCursorMessage ? " (inclusive)" : ""));
             }
 
+            var scanStartCursor = cursor.Value;
             var maximumMessageDate = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeSeconds();
-            var messages = await GetMessagesAfterCursorAsync(
-                cursor.Value,
-                includeCursorMessage,
-                MaximumScannedMessages,
-                maximumMessageDate);
-            if (messages.Count == 0)
-            {
-                Console.WriteLine($"[Telegram] No message older than one day after cursor {cursor.Value}.");
-                return;
-            }
-
-            var oldCursor = cursor.Value;
-            var oldIncludeCursorMessage = includeCursorMessage;
-            var newCursor = oldCursor;
-            var newIncludeCursorMessage = oldIncludeCursorMessage;
             var pendingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var scanned = 0;
-            foreach (var message in messages)
+            var totalScanned = 0;
+            var batches = 0;
+            while (true)
             {
-                scanned++;
-                if (!TryCreateWork(message, out var discoveredWork))
+                var messages = await GetMessagesAfterCursorAsync(
+                    cursor.Value,
+                    includeCursorMessage,
+                    MaximumScannedMessages,
+                    maximumMessageDate);
+                if (messages.Count == 0)
                 {
-                    if (pendingIds.Count == 0)
-                    {
-                        newCursor = message.Id;
-                        newIncludeCursorMessage = false;
-                    }
-                    continue;
+                    if (totalScanned == 0)
+                        Console.WriteLine($"[Telegram] No message older than one day after cursor {cursor.Value}.");
+                    break;
                 }
 
-                works.TryGetValue(discoveredWork.Id, out var existingWork);
-                if (existingWork is not null && existingWork.MessageId != discoveredWork.MessageId)
-                    throw new InvalidOperationException(
-                        $"Duplicate Telegram RJ {discoveredWork.Id}: messages {existingWork.MessageId} and {discoveredWork.MessageId}.");
-
-                if (existingWork?.Active == true)
+                batches++;
+                var oldCursor = cursor.Value;
+                var oldIncludeCursorMessage = includeCursorMessage;
+                var newCursor = oldCursor;
+                var newIncludeCursorMessage = oldIncludeCursorMessage;
+                var scanned = 0;
+                foreach (var message in messages)
                 {
+                    scanned++;
+                    if (!TryCreateWork(message, out var discoveredWork))
+                    {
+                        if (pendingIds.Count == 0)
+                        {
+                            newCursor = message.Id;
+                            newIncludeCursorMessage = false;
+                        }
+                        continue;
+                    }
+
+                    works.TryGetValue(discoveredWork.Id, out var existingWork);
+                    if (existingWork is not null && existingWork.MessageId != discoveredWork.MessageId)
+                        throw new InvalidOperationException(
+                            $"Duplicate Telegram RJ {discoveredWork.Id}: messages {existingWork.MessageId} and {discoveredWork.MessageId}.");
+
+                    if (existingWork?.Active == true)
+                    {
+                        pendingIds.Add(discoveredWork.Id);
+                        if (pendingIds.Count >= MaximumPendingWorks)
+                            break;
+                        continue;
+                    }
+
+                    if (IsExcluded(discoveredWork.Id))
+                    {
+                        if (pendingIds.Count == 0)
+                        {
+                            newCursor = message.Id;
+                            newIncludeCursorMessage = false;
+                        }
+                        continue;
+                    }
+
+                    if (existingWork is null)
+                    {
+                        works.Add(discoveredWork.Id, discoveredWork);
+                        Console.WriteLine(
+                            $"[Telegram] Work discovered: {discoveredWork.Id}, " +
+                            $"message={discoveredWork.MessageId}, kind={discoveredWork.Kind}");
+                    }
+
                     pendingIds.Add(discoveredWork.Id);
                     if (pendingIds.Count >= MaximumPendingWorks)
                         break;
-                    continue;
                 }
 
-                if (IsExcluded(discoveredWork.Id))
+                totalScanned += scanned;
+                if (newCursor != oldCursor || newIncludeCursorMessage != oldIncludeCursorMessage)
                 {
-                    if (pendingIds.Count == 0)
-                    {
-                        newCursor = message.Id;
-                        newIncludeCursorMessage = false;
-                    }
-                    continue;
+                    cursor = newCursor;
+                    includeCursorMessage = newIncludeCursorMessage;
+                    SaveCursor(newCursor, newIncludeCursorMessage);
                 }
-
-                if (existingWork is null)
+                foreach (var pair in locallyExcludedWorkIds.Where(pair => pair.Value <= cursor.Value).ToList())
+                    locallyExcludedWorkIds.Remove(pair.Key);
+                foreach (var pair in unavailableWorkIds.Where(pair => pair.Value <= cursor.Value).ToList())
                 {
-                    works.Add(discoveredWork.Id, discoveredWork);
+                    unavailableWorkIds.Remove(pair.Key);
+                    if (works.TryGetValue(pair.Key, out var work) && !work.Active)
+                        works.Remove(pair.Key);
                 }
 
-                pendingIds.Add(discoveredWork.Id);
-                if (pendingIds.Count >= MaximumPendingWorks)
+                if (pendingIds.Count > 0 || messages.Count < MaximumScannedMessages)
                     break;
-            }
 
-            if (newCursor != oldCursor || newIncludeCursorMessage != oldIncludeCursorMessage)
-            {
-                cursor = newCursor;
-                includeCursorMessage = newIncludeCursorMessage;
-                SaveCursor(newCursor, newIncludeCursorMessage);
-            }
-            foreach (var pair in locallyExcludedWorkIds.Where(pair => pair.Value <= cursor.Value).ToList())
-                locallyExcludedWorkIds.Remove(pair.Key);
-            foreach (var pair in unavailableWorkIds.Where(pair => pair.Value <= cursor.Value).ToList())
-            {
-                unavailableWorkIds.Remove(pair.Key);
-                if (works.TryGetValue(pair.Key, out var work) && !work.Active)
-                    works.Remove(pair.Key);
+                Console.WriteLine(
+                    $"[Telegram] Scan batch contained no pending work; continuing after cursor {cursor.Value}.");
+                await Task.Delay(RequestInterval);
             }
 
             Console.WriteLine(
-                $"[Telegram] Scan done: messages={scanned}, pending={pendingIds.Count}, " +
-                $"cursor={oldCursor}->{cursor.Value}.");
+                $"[Telegram] Scan done: batches={batches}, messages={totalScanned}, " +
+                $"pending={pendingIds.Count}, cursor={scanStartCursor}->{cursor.Value}.");
         }
 
         public IEnumerable<BaseWork> GetDownloadCandidates()
@@ -324,6 +343,9 @@ namespace Telegram
 
                     work.Files.AddRange(files);
                     work.FilesLoaded = true;
+                    Console.WriteLine(
+                        $"[Telegram] Files resolved: {work.Id}, message={work.MessageId}, " +
+                        $"files={work.Files.Count}: {string.Join(" | ", work.Files.Select(file => file.FileName))}");
                 }
 
                 work.Active = true;
@@ -341,7 +363,9 @@ namespace Telegram
                         synchronous: false);
                 }
 
-                Console.WriteLine($"[Telegram] Download started: {work.Id}, files={work.Files.Count}");
+                Console.WriteLine(
+                    $"[Telegram] Download started: {work.Id}, message={work.MessageId}, " +
+                    $"files={work.Files.Count}");
                 return true;
             }
             catch (Exception ex)
@@ -411,7 +435,9 @@ namespace Telegram
 
                 work.Active = false;
                 locallyExcludedWorkIds[work.Id] = work.MessageId;
-                Console.WriteLine($"[Telegram] Download done: {work.Id}");
+                Console.WriteLine(
+                    $"[Telegram] Download done: {work.Id}, message={work.MessageId}, " +
+                    $"files={work.Files.Count}");
                 return DownloadCheckResult.Completed;
             }
             catch (Exception ex)
@@ -635,6 +661,13 @@ namespace Telegram
         {
             if (client is null || channel is null)
                 throw new InvalidOperationException("Telegram channel is not initialized.");
+
+            var properties = await client.GetMessagePropertiesAsync(channel.Id, work.MessageId);
+            if (!properties.CanGetMessageThread)
+            {
+                Console.WriteLine($"[Telegram] No discussion thread: {work.Id}, message={work.MessageId}");
+                return new List<TelegramDownloadFile>();
+            }
 
             var thread = await client.GetMessageThreadAsync(channel.Id, work.MessageId);
             var messages = thread.Messages.ToDictionary(message => message.Id);
