@@ -135,7 +135,11 @@ namespace asmr.one
         //id to  work,此处的id是asmrone的id，可能不等于dlsite id
         private Dictionary<int, Work> works = new Dictionary<int, Work>();
         private Dictionary<string, Work> works_by_rj = new Dictionary<string, Work>(StringComparer.OrdinalIgnoreCase);
-        private static List<string> audio_extensions = new List<string> { "mp3", "wav", "wave", "flac", "wma", "mpa", "ram", "ra", "aac", "aif", "m4a", "tsa", "mp4", "wmv" };
+        private static List<string> audio_extensions = new List<string> { "mp3", "wav", "wave", "flac", "wma", "aac", "m4a", "mp4", "wmv" };
+        private static readonly HashSet<string> media_extensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "mp3", "wav", "wave", "flac", "ogg", "wma", "aac", "m4a", "mp4", "mov", "webm", "mkv", "wmv", "asf"
+        };
         public HashSet<string> exclude_extensions = new HashSet<string> { "png", "jpg", "jpeg", "gif", "webp", "tiff", "jfif", "bmp", "txt", "pdf" };
         private static HashSet<string> wavflac_extensions = new HashSet<string> { ".wav", ".wave", ".flac" };
         private static readonly string RuntimeDirectory =
@@ -690,11 +694,6 @@ namespace asmr.one
 
             return NormalizeExtension(Path.GetExtension(title));
         }
-        private static bool ShouldProbeFileSignature(UrlCheckResult result)
-        {
-            //明确且已知的Content-Type优先使用；仅对缺失、泛型或未知类型增加Range请求
-            return string.IsNullOrWhiteSpace(result.MediaType) || !MediaTypeExtensions.ContainsKey(result.MediaType);
-        }
         private static bool HasAscii(ReadOnlySpan<byte> data, int offset, string value)
         {
             if (offset < 0 || offset + value.Length > data.Length)
@@ -737,13 +736,6 @@ namespace asmr.one
 
                 if (HasAscii(data, brandStart, "M4A ") || HasAscii(data, brandStart, "M4P "))
                     return ".m4a";
-                if (HasAscii(data, brandStart, "M4B "))
-                    return ".m4b";
-                if (HasAscii(data, brandStart, "3gp"))
-                    return ".3gp";
-                if (HasAscii(data, brandStart, "3g2"))
-                    return ".3g2";
-
                 //其余常见ISO Base Media品牌使用MP4扩展名
                 if (HasAscii(data, brandStart, "isom") || HasAscii(data, brandStart, "iso") ||
                     HasAscii(data, brandStart, "mp4") || HasAscii(data, brandStart, "avc1") ||
@@ -755,6 +747,11 @@ namespace asmr.one
         }
         private static string DetectFileExtensionFromSignature(ReadOnlySpan<byte> data)
         {
+            //文本BOM不是媒体签名；尤其FF FE也满足宽松的MPEG同步位判断
+            if ((data.Length >= 2 && ((data[0] == 0xFF && data[1] == 0xFE) ||
+                                      (data[0] == 0xFE && data[1] == 0xFF))) ||
+                (data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF))
+                return "";
             if (data.Length >= 12 && HasAscii(data, 0, "RIFF") && HasAscii(data, 8, "WAVE"))
                 return ".wav";
             if (HasAscii(data, 0, "fLaC"))
@@ -763,7 +760,12 @@ namespace asmr.one
                 return ".ogg";
             if (HasAscii(data, 0, "ID3"))
                 return ".mp3";
-
+            if (data.Length >= 16 &&
+                data[0] == 0x30 && data[1] == 0x26 && data[2] == 0xB2 && data[3] == 0x75 &&
+                data[4] == 0x8E && data[5] == 0x66 && data[6] == 0xCF && data[7] == 0x11 &&
+                data[8] == 0xA6 && data[9] == 0xD9 && data[10] == 0x00 && data[11] == 0xAA &&
+                data[12] == 0x00 && data[13] == 0x62 && data[14] == 0xCE && data[15] == 0x6C)
+                return ".asf";
             var isoBaseMediaExtension = DetectIsoBaseMediaExtension(data);
             if (isoBaseMediaExtension != "")
                 return isoBaseMediaExtension;
@@ -778,9 +780,13 @@ namespace asmr.one
             }
 
             //区分MP3帧同步头和AAC ADTS头
-            if (data.Length >= 2 && data[0] == 0xFF && (data[1] & 0xE0) == 0xE0)
+            if (data.Length >= 3 && data[0] == 0xFF && (data[1] & 0xE0) == 0xE0)
             {
-                if ((data[1] & 0x06) != 0)
+                var version = (data[1] >> 3) & 0x03;
+                var layer = (data[1] >> 1) & 0x03;
+                var bitrate = (data[2] >> 4) & 0x0F;
+                var sampleRate = (data[2] >> 2) & 0x03;
+                if (version != 0x01 && layer == 0x01 && bitrate is > 0 and < 0x0F && sampleRate != 0x03)
                     return ".mp3";
                 if ((data[1] & 0xF6) == 0xF0)
                     return ".aac";
@@ -874,6 +880,14 @@ namespace asmr.one
             var ext = Path.GetExtension(title.ToLower()).TrimStart(new char[] { '.' });
             return audio_extensions.Contains(ext);
         }
+        private static bool IsMediaExtension(string extension)
+        {
+            return media_extensions.Contains(extension.TrimStart('.'));
+        }
+        private static bool IsMedia(string title)
+        {
+            return IsMediaExtension(Path.GetExtension(title));
+        }
         public static bool isWavOrFlac(string name)
         {
             return wavflac_extensions.Contains(Path.GetExtension(name).ToLower());
@@ -907,7 +921,7 @@ namespace asmr.one
             else if (json.ContainsKey("mediaDownloadUrl") || json.ContainsKey("mediaStreamUrl"))
             {
                 var title = FileNameCheck(json.Value<string>("title")!);
-                if (IsUselessFiles(title))
+                if (IsUselessFiles(title) || !IsMedia(title))
                     return true;
 
                 //对于某些文件(常见于wav，mp4一般没有fast版)，mediaDownloadUrl是large.kiko-play-niptan.one下的原版文件，而streamLowQualityUrl/mediaStreamUrl中的一个或两个是fast.kiko-play-niptan.one下转换格式后的文件
@@ -965,19 +979,15 @@ namespace asmr.one
                     // 优先使用服务器声明的媒体类型，避免URL后缀与实际文件类型不一致时IDM修改文件名
                     var fallbackExtension = GetFileExtension(selectedResult, url, title);
                     var fallbackTitle = fallbackExtension == "" ? title : Path.ChangeExtension(title, fallbackExtension);
-                    var extension = fallbackExtension;
-                    if (ShouldProbeFileSignature(selectedResult))
+                    var extension = await ProbeFileExtension(url);
+                    if (!IsMediaExtension(extension))
                     {
-                        var detectedExtension = await ProbeFileExtension(url);
-                        if (detectedExtension != "")
-                        {
-                            extension = detectedExtension;
-                            if (!string.Equals(extension, fallbackExtension, StringComparison.OrdinalIgnoreCase))
-                                Console.WriteLine($"Correct Extension By Signature:{fallbackExtension} -> {extension} {title}");
-                        }
+                        Console.WriteLine($"Skip Non-Media Signature:{title}");
+                        return true;
                     }
-                    if (extension != "")
-                        title = Path.ChangeExtension(title, extension);
+                    if (!string.Equals(extension, fallbackExtension, StringComparison.OrdinalIgnoreCase))
+                        Console.WriteLine($"Correct Extension By Signature:{fallbackExtension} -> {extension} {title}");
+                    title = Path.ChangeExtension(title, extension);
                     //扩展名改变时保持原有hash主体，只替换后缀，确保能识别IDM已经下载的文件
                     work.files.Add(new Work.File_(title, parent, url, fallbackTitle));
                 }
