@@ -575,7 +575,6 @@ namespace asmr.one
 
                 File.Move(tempDest, dest, true);
                 fi.Delete();
-                Console.WriteLine($"Done: {fi.FullName}");
                 return true;
             }
             catch (Exception e)

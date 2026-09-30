@@ -277,6 +277,33 @@ namespace Telegram
                             $"message={discoveredWork.MessageId}, kind={discoveredWork.Kind}");
                     }
 
+                    var work = existingWork ?? discoveredWork;
+                    if (!work.FilesLoaded)
+                    {
+                        //扫描时确认来源可用，避免无文件的作品占住游标直到下一次更新。
+                        //请求异常继续向外抛出，不能把临时网络故障当作来源不可用。
+                        var files = await GetWorkFilesAsync(work);
+                        if (files.Count == 0)
+                        {
+                            Console.WriteLine(
+                                $"[Telegram] No target files; marked unavailable for this run: " +
+                                $"{work.Id} message {work.MessageId}");
+                            unavailableWorkIds[work.Id] = work.MessageId;
+                            if (pendingIds.Count == 0)
+                            {
+                                newCursor = message.Id;
+                                newIncludeCursorMessage = false;
+                            }
+                            continue;
+                        }
+
+                        work.Files.AddRange(files);
+                        work.FilesLoaded = true;
+                        Console.WriteLine(
+                            $"[Telegram] Files resolved: {work.Id}, message={work.MessageId}, " +
+                            $"files={work.Files.Count}: {string.Join(" | ", work.Files.Select(file => file.FileName))}");
+                    }
+
                     pendingIds.Add(discoveredWork.Id);
                     if (pendingIds.Count >= MaximumPendingWorks)
                         break;
