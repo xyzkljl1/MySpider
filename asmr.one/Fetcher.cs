@@ -722,24 +722,32 @@ namespace asmr.one
                               ((uint)data[boxOffset + 1] << 16) |
                               ((uint)data[boxOffset + 2] << 8) |
                               data[boxOffset + 3];
-                var availableBoxLength = boxSize >= 12 && boxSize <= int.MaxValue
-                    ? Math.Min(data.Length - boxOffset, (int)boxSize)
-                    : data.Length - boxOffset;
+                if (boxSize < 16)
+                    return "";
+                var availableBoxLength = (int)Math.Min((uint)(data.Length - boxOffset), boxSize);
+                if (availableBoxLength < 16)
+                    return "";
                 var brandStart = typeOffset + 4;
                 var brandEnd = boxOffset + availableBoxLength;
 
                 //QuickTime品牌优先；RJ01604150的文件头为“ftyp qt  ”
                 for (var brandOffset = brandStart; brandOffset + 4 <= brandEnd; brandOffset += 4)
-                    if (HasAscii(data, brandOffset, "qt  "))
+                    if (brandOffset != brandStart + 4 && HasAscii(data, brandOffset, "qt  "))
                         return ".mov";
 
                 if (HasAscii(data, brandStart, "M4A ") || HasAscii(data, brandStart, "M4P "))
                     return ".m4a";
-                //其余常见ISO Base Media品牌使用MP4扩展名
-                if (HasAscii(data, brandStart, "isom") || HasAscii(data, brandStart, "iso") ||
-                    HasAscii(data, brandStart, "mp4") || HasAscii(data, brandStart, "avc1") ||
-                    HasAscii(data, brandStart, "dash") || HasAscii(data, brandStart, "MSNV"))
-                    return ".mp4";
+                //同时检查主品牌和兼容品牌，跳过主品牌后面的4字节版本号。
+                for (var brandOffset = brandStart; brandOffset + 4 <= brandEnd; brandOffset += 4)
+                {
+                    if (brandOffset == brandStart + 4)
+                        continue;
+                    if (HasAscii(data, brandOffset, "M4V ") ||
+                        HasAscii(data, brandOffset, "isom") || HasAscii(data, brandOffset, "iso") ||
+                        HasAscii(data, brandOffset, "mp4") || HasAscii(data, brandOffset, "avc1") ||
+                        HasAscii(data, brandOffset, "dash") || HasAscii(data, brandOffset, "MSNV"))
+                        return ".mp4";
+                }
                 return "";
             }
             return "";
