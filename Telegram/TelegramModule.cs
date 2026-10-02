@@ -165,6 +165,10 @@ namespace Telegram
                 if (!await LoginAsync())
                     return false;
 
+                //频道移入归档后，重新加载主列表和归档列表以更新聊天信息。
+                await client.LoadChatsAsync(new TdApi.ChatList.ChatListMain(), 1000);
+                await client.LoadChatsAsync(new TdApi.ChatList.ChatListArchive(), 1000);
+
                 channel = await FindChannelAsync();
                 Console.WriteLine($"[Telegram] Channel found: @{ChannelUsername} {channel.Title} ({channel.Id})");
                 return true;
