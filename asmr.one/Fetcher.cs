@@ -69,10 +69,10 @@ namespace asmr.one
                 subdir = _d;
                 url = _u;
                 //临时文件名，用相对路径的hash以防止重名并保证重启后不重新下载
-                //扩展名被文件签名修正时仍使用修正前的名称计算hash，以复用IDM已经下载的文件
-                tmp_name = MD5Sum($"{subdir}/{_tmpIdentityName ?? name}");
-                if (name.Contains("."))//需要使用相同的后缀名以避免IDM弹窗
-                    tmp_name += "." + name.Split('.').Last();
+                //下载时保留响应信息推导的扩展名，签名确定的最终名称在归档时使用
+                var temporaryName = _tmpIdentityName ?? name;
+                tmp_name = MD5Sum($"{subdir}/{temporaryName}");
+                tmp_name += Path.GetExtension(temporaryName);
             }
             public string tmp_name;
             public string name;
@@ -349,7 +349,7 @@ namespace asmr.one
             if (ChineseGroupId.Contains(work.group))
                 return true;
             string src_dir = Path.Combine(TmpDir, work.title);
-            var files = work.files.Where(file => file.downloaded && IsAudio(file.tmp_name))
+            var files = work.files.Where(file => file.downloaded && IsAudio(file.name))
                 .Select(file => Path.Combine(src_dir, file.tmp_name))
                 .ToList()
                 .Shuffle();
@@ -460,7 +460,7 @@ namespace asmr.one
                     var downloadedFiles = new List<DownloadedFile>(work.files.Count);
                     foreach (var file in work.files)
                     {
-                        if (isWavOrFlac(file.tmp_name))
+                        if (isWavOrFlac(file.name))
                             if (await ConvertToMp3(new FileInfo($"{src_dir}/{file.tmp_name}")))
                             {
                                 file.tmp_name += ".mp3";
@@ -648,6 +648,11 @@ namespace asmr.one
                     var dir = TmpDir + "/" + work.title;
                     if (!Directory.Exists(dir))
                         Directory.CreateDirectory(dir);
+                    //兼容旧版本按签名扩展名保存的临时文件，避免重新下载
+                    var previousName = Path.ChangeExtension(file.tmp_name, Path.GetExtension(file.name));
+                    if (!File.Exists(Path.Combine(dir, file.tmp_name)) &&
+                        File.Exists(Path.Combine(dir, previousName)))
+                        file.tmp_name = previousName;
                     //程序启动前就已经下载的文件
                     if (File.Exists($"{dir}/{file.tmp_name}"))
                     {
@@ -995,7 +1000,7 @@ namespace asmr.one
                     if (!string.Equals(extension, fallbackExtension, StringComparison.OrdinalIgnoreCase))
                         Console.WriteLine($"Correct Extension By Signature:{fallbackExtension} -> {extension} {title}");
                     title = Path.ChangeExtension(title, extension);
-                    //扩展名改变时保持原有hash主体，只替换后缀，确保能识别IDM已经下载的文件
+                    //临时名称用于IDM下载和完成检查，签名确定的名称用于最终归档
                     work.files.Add(new Work.File_(title, parent, url, fallbackTitle));
                 }
                 return true;
