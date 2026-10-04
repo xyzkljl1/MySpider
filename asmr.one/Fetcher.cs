@@ -129,7 +129,6 @@ namespace asmr.one
         private ICIDMLinkTransmitter2? idm;
         private HttpClient httpClient;
         CookieContainer cookies_container = new CookieContainer();
-        private DateTime LastFetchTime = DateTime.MinValue;
         private int process_id = 0;
         string bearer_token = "";
         //id to  work,此处的id是asmrone的id，可能不等于dlsite id
@@ -805,16 +804,38 @@ namespace asmr.one
             }
             return "";
         }
+        private async Task<HttpResponseMessage> SendWithRateLimitRetryAsync(Func<Task<HttpResponseMessage>> send)
+        {
+            while (true)
+            {
+                var response = await send();
+                if (response.StatusCode != HttpStatusCode.TooManyRequests)
+                    return response;
+
+                var retryAfter = response.Headers.RetryAfter;
+                var delay = retryAfter?.Delta
+                    ?? (retryAfter?.Date - DateTimeOffset.UtcNow)
+                    ?? TimeSpan.FromMinutes(30);
+                if (delay <= TimeSpan.Zero)
+                    delay = TimeSpan.FromMinutes(1);
+                response.Dispose();
+                Console.WriteLine($"[ASMR.ONE] HTTP 429; waiting {Math.Ceiling(delay.TotalSeconds)} seconds until {DateTimeOffset.Now + delay:O}, then retrying the request.");
+                await Task.Delay(delay);
+            }
+        }
         private async Task<string> ProbeFileExtension(string url)
         {
             const int probeLength = 64;
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, probeLength - 1);
-                request.Headers.AcceptEncoding.Clear();
-                request.Headers.AcceptEncoding.ParseAdd("identity");
-                using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                using var response = await SendWithRateLimitRetryAsync(async () =>
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, probeLength - 1);
+                    request.Headers.AcceptEncoding.Clear();
+                    request.Headers.AcceptEncoding.ParseAdd("identity");
+                    return await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                });
                 if (!response.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"Probe File Type Bad HTTP {(int)response.StatusCode}");
@@ -852,8 +873,12 @@ namespace asmr.one
                  分配的缓冲区占用内存在任务管理器中显示为"提交"，在VS调试工具中显示为"专用"
                  这些内存不会随着response析构/httpclient.Dispose/GC.Collect而释放，Why??
                 */
-                using (var request = new HttpRequestMessage(HttpMethod.Head, url))
-                using (var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead))
+                using (var response = await SendWithRateLimitRetryAsync(async () =>
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Head, url);
+                    return await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                }))
+                {
                     if (response.IsSuccessStatusCode)
                     {
                         var mediaType = response.Content.Headers.ContentType?.MediaType;
@@ -873,6 +898,7 @@ namespace asmr.one
                         else//有的content类型不带length
                             return new UrlCheckResult(RequestResult.Good, mediaType, fileName);
                     }
+                }
             }
             catch (Exception ex)
             {
@@ -1000,6 +1026,8 @@ namespace asmr.one
                 //seed不知道是什么,subtitle=1是带字幕，subtitle=0包含subtitle=1,page从1开始而非0
                 string base_url = "https://api.asmr.one/api/works?order=id&sort=desc&page={0}&seed=35&subtitle=0";
                 var first_page = await GetJson(string.Format(base_url, 1))!;
+                if (first_page is null)
+                    return;
                 var total_count = first_page!.Value<JObject>("pagination")!.Value<Int32>("totalCount");
                 var page_size = first_page.Value<JObject>("pagination")!.Value<Int32>("pageSize");
                 var new_works = new List<KeyValuePair<int, Work>>();
@@ -1120,7 +1148,7 @@ namespace asmr.one
             for (int i = 5; i > 0; --i)
                 try
                 {
-                    using (HttpResponseMessage response = await httpClient.GetAsync(addr))
+                    using (HttpResponseMessage response = await SendWithRateLimitRetryAsync(() => httpClient.GetAsync(addr)))
                     {
                         if (!response.IsSuccessStatusCode)
                         {
@@ -1144,7 +1172,7 @@ namespace asmr.one
             for (int i = 5; i > 0; --i)
                 try
                 {
-                    using var response = await httpClient.GetAsync(addr);
+                    using var response = await SendWithRateLimitRetryAsync(() => httpClient.GetAsync(addr));
                     var content = await response.Content.ReadAsStringAsync();
                     if (response.IsSuccessStatusCode)
                         return (content, false);
@@ -1167,7 +1195,7 @@ namespace asmr.one
                 try
                 {
                     using (var content = new StringContent(data, encoding, type))
-                    using (HttpResponseMessage response = await httpClient.PostAsync(addr, content))
+                    using (HttpResponseMessage response = await SendWithRateLimitRetryAsync(() => httpClient.PostAsync(addr, content)))
                     {
                         if (!response.IsSuccessStatusCode)
                         {
