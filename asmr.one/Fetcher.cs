@@ -940,51 +940,36 @@ namespace asmr.one
                 //由于large.kiko-play-niptan.one的rate limit严重，尽量使用另外两种
                 var url_download = json.Value<string>("mediaDownloadUrl");
                 //stream_url要加上token
-                var url_stream = (json.ContainsKey("mediaStreamUrl") && json.Value<string>("mediaStreamUrl") != "") ? json.Value<string>("mediaStreamUrl") + "?token=" + bearer_token : "";
-                var url_low = (json.ContainsKey("streamLowQualityUrl") && json.Value<string>("streamLowQualityUrl") != "") ? json.Value<string>("streamLowQualityUrl") + "?token=" + bearer_token : "";
+                var streamAddress = json.Value<string>("mediaStreamUrl");
+                var lowAddress = json.Value<string>("streamLowQualityUrl");
+                var url_stream = string.IsNullOrEmpty(streamAddress) || streamAddress == url_download
+                    ? streamAddress : streamAddress + "?token=" + bearer_token;
+                var url_low = string.IsNullOrEmpty(lowAddress) || lowAddress == url_download
+                    ? lowAddress : lowAddress == streamAddress ? url_stream : lowAddress + "?token=" + bearer_token;
                 bool is_audio = IsAudio(title);
-                var ret_download = await CheckURL(url_download, is_audio);
-                var ret_stream = await CheckURL(url_stream, is_audio);
-                var ret_low = await CheckURL(url_low, is_audio);
                 string? url = null;
                 UrlCheckResult? selectedResult = null;
-                //个别文件的downloadurl无效，而streamurl有效，如RJ061291
-                //由于谜之原因，部分文件大小为0，这些文件IDM无法完成下载，直接排除
-                //请求失败可能是短暂的网络错误，此时也视作无效
-                if (ret_download.Result == RequestResult.Good)//若其中一个url确定生效则使用它；url_download优先于url_stream
+                var canSkip = false;
+                //按原顺序选择可用地址；普通地址成功后不再探测备用地址。
+                //large地址仍尝试寻找非large替代来源，完全相同的地址只检查一次。
+                foreach (var candidate in new[] { url_download, url_stream, url_low }
+                             .Where(candidate => !string.IsNullOrEmpty(candidate))
+                             .Distinct(StringComparer.Ordinal))
                 {
-                    url = url_download;
-                    selectedResult = ret_download;
-                    //对于large.*下的，尽量用别的网址替代，要注意此时格式的变化
-                    if (url is not null && url.Contains("large.kiko-play-niptan.one"))
+                    if (url is not null && candidate!.Contains("large.kiko-play-niptan.one"))
+                        continue;
+                    var result = await CheckURL(candidate, is_audio);
+                    canSkip |= result.Result == RequestResult.Skip;
+                    if (result.Result == RequestResult.Good)
                     {
-                        if (ret_stream.Result == RequestResult.Good && !url_stream.Contains("large.kiko-play-niptan.one"))
-                        {
-                            url = url_stream;
-                            selectedResult = ret_stream;
-                        }
-                        else if (ret_low.Result == RequestResult.Good && !url_low.Contains("large.kiko-play-niptan.one"))
-                        {
-                            url = url_low;
-                            selectedResult = ret_low;
-                        }
+                        url = candidate;
+                        selectedResult = result;
+                        if (!url!.Contains("large.kiko-play-niptan.one"))
+                            break;
                     }
                 }
-                else if (ret_stream.Result == RequestResult.Good)
-                {
-                    url = url_stream;
-                    selectedResult = ret_stream;
-                }
-                else if (ret_low.Result == RequestResult.Good)
-                {
-                    url = url_low;
-                    selectedResult = ret_low;
-                }
-                // 如果没有good,且至少一个为skip，说明这是个不需要下载的小文件,跳过
-                else if (ret_download.Result == RequestResult.Skip || ret_stream.Result == RequestResult.Skip || ret_low.Result == RequestResult.Skip)
-                    url = null;
-                // 如果全部为bad,则返回失败
-                else if (is_audio)
+                //没有可用地址时，只有明确的小文件才跳过；全部失败则返回解析失败。
+                if (url is null && !canSkip && is_audio)
                     return false;
                 if (!(url is null) && selectedResult is not null)
                 {
