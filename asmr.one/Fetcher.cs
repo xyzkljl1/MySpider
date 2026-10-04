@@ -622,9 +622,6 @@ namespace asmr.one
                 {
                     Console.WriteLine("Can't Get Track_2 " + work.RJ);
                     work.files.Clear();
-                    work.source_unavailable = true;
-                    work.cursor_resolved = true;
-                    AdvanceCursor();
                     return false;
                 }
                 if (work.files.Count == 0)
