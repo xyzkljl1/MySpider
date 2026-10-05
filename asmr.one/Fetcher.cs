@@ -886,7 +886,7 @@ namespace asmr.one
                             //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
                             var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
                             if (len == 0)
-                                return new UrlCheckResult(RequestResult.Bad, mediaType, fileName);
+                                return new UrlCheckResult(RequestResult.Skip, mediaType, fileName);
                             else if (is_audio && len < 1024 * 200)
                                 return new UrlCheckResult(RequestResult.Skip, mediaType, fileName);
                             else
@@ -991,7 +991,7 @@ namespace asmr.one
                             break;
                     }
                 }
-                //没有可用地址时，只有明确的小文件才跳过；全部失败则返回解析失败。
+                //没有可用地址时，只有明确的空文件或小音频才跳过；全部失败则返回解析失败。
                 if (url is null && !canSkip && is_audio)
                     return false;
                 if (!(url is null) && selectedResult is not null)
