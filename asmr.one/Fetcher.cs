@@ -96,6 +96,7 @@ namespace asmr.one
         {
             Good,
             Skip,
+            Empty,
             Bad
         };
         private sealed record UrlCheckResult(RequestResult Result, string? MediaType, string? FileName);
@@ -620,8 +621,14 @@ namespace asmr.one
                     get_track_success &= await ParseTracks(work, "", track.ToObject<JObject>()!);
                 if (!get_track_success)
                 {
-                    Console.WriteLine("Can't Get Track_2 " + work.RJ);
                     work.files.Clear();
+                    if (work.source_unavailable)
+                    {
+                        work.cursor_resolved = true;
+                        AdvanceCursor();
+                    }
+                    else
+                        Console.WriteLine("Can't Get Track_2 " + work.RJ);
                     return false;
                 }
                 if (work.files.Count == 0)
@@ -886,7 +893,7 @@ namespace asmr.one
                             //单位:byte，排除小于200KB的音频，以避免坑爹的情况，如RJ066580
                             var len = Int64.Parse(response.Content.Headers.GetValues("Content-Length").First());
                             if (len == 0)
-                                return new UrlCheckResult(RequestResult.Skip, mediaType, fileName);
+                                return new UrlCheckResult(RequestResult.Empty, mediaType, fileName);
                             else if (is_audio && len < 1024 * 200)
                                 return new UrlCheckResult(RequestResult.Skip, mediaType, fileName);
                             else
@@ -929,6 +936,8 @@ namespace asmr.one
         }
         private async Task<bool> ParseTracks(Work work, string parent, JObject json)
         {
+            if (work.source_unavailable)
+                return false;
             if (json == null)
                 return false;
             if (!json.ContainsKey("type"))
@@ -973,6 +982,7 @@ namespace asmr.one
                 string? url = null;
                 UrlCheckResult? selectedResult = null;
                 var canSkip = false;
+                var hasEmptyFile = false;
                 //按原顺序选择可用地址；普通地址成功后不再探测备用地址。
                 //large地址仍尝试寻找非large替代来源，完全相同的地址只检查一次。
                 foreach (var candidate in new[] { url_download, url_stream, url_low }
@@ -983,6 +993,7 @@ namespace asmr.one
                         continue;
                     var result = await CheckURL(candidate, is_audio);
                     canSkip |= result.Result == RequestResult.Skip;
+                    hasEmptyFile |= result.Result == RequestResult.Empty;
                     if (result.Result == RequestResult.Good)
                     {
                         url = candidate;
@@ -991,7 +1002,13 @@ namespace asmr.one
                             break;
                     }
                 }
-                //没有可用地址时，只有明确的空文件或小音频才跳过；全部失败则返回解析失败。
+                if (url is null && hasEmptyFile)
+                {
+                    Console.WriteLine($"Skip Work {work.RJ}: Empty File {parent}/{title}");
+                    work.source_unavailable = true;
+                    return false;
+                }
+                //没有可用地址时，只有明确的小音频才跳过；全部失败则返回解析失败。
                 if (url is null && !canSkip && is_audio)
                     return false;
                 if (!(url is null) && selectedResult is not null)
